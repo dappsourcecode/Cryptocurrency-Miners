@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WASM Lyra2 Miner</title>
+    <script src="mintme_miner.js"></script>
+</head>
+<body>
+    <h2>MintMe WASM Miner</h2>
+    <p>Status: <span id="status">Loading WASM...</span></p>
+    <p>Hashrate: <span id="hashrate">0</span> H/s</p>
+
+    <script>
+        Module.onRuntimeInitialized = function() {
+            document.getElementById('status').innerText = "WASM Loaded. Starting...";
+            startMining();
+        };
+
+        function startMining() {
+            // 1. Get the C function wrapper
+            const hashFunc = Module.cwrap('hash_data', null, ['number', 'number', 'number']);
+
+            // 2. Allocate Memory in WASM Heap
+            const inputLen = 80; // Standard block header size
+            const inputPtr = Module._malloc(inputLen);
+            const outputPtr = Module._malloc(32); // 32-byte hash result
+
+            // 3. The Mining Loop (Simulated)
+            let nonce = 0;
+            const startTime = Date.now();
+            
+            function mineLoop() {
+                // In a real miner, you'd update the nonce in the inputPtr buffer here
+                // For this demo, we just run the hash function repeatedly
+                
+                const batchSize = 1000;
+                for (let i = 0; i < batchSize; i++) {
+                    hashFunc(inputPtr, outputPtr, inputLen);
+                    nonce++;
+                }
+
+                // Calculate Speed
+                const elapsed = (Date.now() - startTime) / 1000;
+                const hashrate = nonce / elapsed;
+                document.getElementById('hashrate').innerText = hashrate.toFixed(2);
+
+                // Non-blocking loop
+                setTimeout(mineLoop, 0);
+            }
+            
+            mineLoop();
+        }
+    </script>
+</body>
+</html>

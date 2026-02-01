@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Duino-Coin Feasibility Miner (Fixed)</title>
+    <style>
+        body { font-family: 'Courier New', monospace; background: #000; color: #0f0; padding: 20px; max-width: 800px; margin: auto; }
+        .panel { border: 1px solid #333; padding: 15px; margin-bottom: 15px; background: #111; border-radius: 5px; }
+        .input-group { margin-bottom: 10px; }
+        label { display: inline-block; width: 140px; color: #aaa; }
+        input, select { background: #333; color: white; border: 1px solid #555; padding: 5px; width: 250px; }
+        button { background: #008000; color: white; border: none; padding: 10px 20px; cursor: pointer; font-weight: bold; margin-right: 10px; }
+        .stop { background: #800000; }
+        #logs { height: 300px; overflow-y: scroll; border: 1px solid #333; padding: 10px; font-size: 0.85em; background: #050505; }
+    </style>
+</head>
+<body>
+
+    <h2>⚡ Duino-Coin Miner (V4 - Protocol Fixed)</h2>
+    
+    <div class="panel">
+        <div class="input-group">
+            <label>Username:</label>
+            <input type="text" id="username" value="fajar_test">
+        </div>
+        <div class="input-group">
+            <label>Rig Name:</label>
+            <input type="text" id="rigID" value="Paper_Node">
+        </div>
+        <div class="input-group">
+            <label>Mining Key:</label>
+            <input type="password" id="miningKey" placeholder="Optional (Leave Empty)">
+        </div>
+        <div class="input-group">
+            <label>Server Node:</label>
+            <select id="serverSelect">
+                <option value="auto">📍 Auto-Detect (Recommended)</option>
+                <option value="wss://magi.duinocoin.com:14808">🇯🇵 Magi (Master)</option>
+                <option value="wss://server.duinocoin.com:14808">🇪🇺 Server (Europe)</option>
+                <option value="wss://asia.duinocoin.com:14808">🇸🇬 Asia (Alternative)</option>
+            </select>
+        </div>
+        <br>
+        <button onclick="startMining()">🚀 Start Mining</button>
+        <button class="stop" onclick="stopMining()">🛑 Stop</button>
+    </div>
+
+    <div class="panel">
+        <div>Hashrate: <span id="hashrate">0 H/s</span></div>
+        <div>Shares: <span id="shares">0</span></div>
+        <div>Status: <span id="poolName" style="color:yellow">Idle</span></div>
+    </div>
+
+    <div id="logs"></div>
+
+    <script>
+        let socket;
+        let worker;
+        let isMining = false;
+        let wallet_id = Math.floor(Math.random() * 2811); 
+
+        // 1. ROBUST POOL LOCATOR
+        async function getPool() {
+            const manual = document.getElementById('serverSelect').value;
+            if(manual !== "auto") {
+                return { url: manual, name: "Manual Selection" };
+            }
+
+            log("🔍 Checking Duino-Coin Network...");
+            try {
+                const response = await fetch('https://server.duinocoin.com/getPool');
+                const data = await response.json();
+                
+                // FIX: Do NOT use the IP (data.ip). Use the name to build a domain.
+                // If API returns name="Magi", we connect to "magi.duinocoin.com"
+                // Browsers block WSS to IPs (SSL Cert Mismatch).
+                
+                let targetDomain = "magi.duinocoin.com"; // Default
+                if(data.name && data.name.toLowerCase() !== "magi") {
+                    // Try to guess the domain: "asia" -> "asia.duinocoin.com"
+                    targetDomain = `${data.name.toLowerCase()}.duinocoin.com`;
+                }
+
+                const finalUrl = `wss://${targetDomain}:14808`;
+                log(`API Recommended: ${data.name} (Connecting to ${targetDomain})`);
+                return { url: finalUrl, name: data.name };
+
+            } catch (e) {
+                log("⚠️ API Failed. Defaulting to Master Server.", "error");
+                return { url: "wss://magi.duinocoin.com:14808", name: "Magi (Fallback)" };
+            }
+        }
+
+        // --- WORKER CODE ---
+        const workerCode = `
+            const textEncoder = new TextEncoder();
+            self.onmessage = async function(e) {
+                const { job, difficulty } = e.data;
+                const lastHash = job[0];
+                const expectedHash = job[1];
+                const limit = 100 * difficulty + 1;
+                
+                for (let nonce = 0; nonce < limit; nonce++) {
+                    const input = lastHash + nonce;
+                    const buffer = textEncoder.encode(input);
+                    const hashBuffer = await crypto.subtle.digest('SHA-1', buffer);
+                    const hashArray = Array.from(new Uint8Array(hashBuffer));
+                    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+                    if (hashHex === expectedHash) {
+                        self.postMessage({ result: nonce }); 
+                        return;
+                    }
+                }
+            };
+        `;
+
+        function log(msg, type="info") {
+            const el = document.getElementById('logs');
+            const color = type === "error" ? "#f55" : (type === "success" ? "#0f0" : "#ccc");
+            el.innerHTML = `<div style="color:${color}">[${new Date().toLocaleTimeString()}] ${msg}</div>` + el.innerHTML;
+        }
+
+        async function startMining() {
+            if(isMining) return;
+            isMining = true;
+            
+            const pool = await getPool();
+            document.getElementById('poolName').innerText = pool.url;
+            log(`Connecting to: ${pool.url}...`);
+
+            socket = new WebSocket(pool.url);
+
+            socket.onopen = () => {
+                log("✅ Connected! Waiting for server hello...");
+            };
+
+            socket.onmessage = (msg) => {
+                const data = msg.data;
+                const username = document.getElementById('username').value;
+                const rig = document.getElementById('rigID').value;
+                const key = document.getElementById('miningKey').value || ""; 
+
+                if (data.includes("2.") || data.includes("3.")) {
+                    log(`Server v${data}. Handshaking...`);
+                    socket.send(`JOB,${username},LOW,${key}`);
+                }
+                else if (data.includes(",")) {
+                    const job = data.split(",");
+                    if(job.length < 3) return; // Invalid packet
+
+                    const difficulty = parseInt(job[2]);
+                    
+                    if (worker) worker.terminate();
+                    const blob = new Blob([workerCode], { type: "application/javascript" });
+                    worker = new Worker(URL.createObjectURL(blob));
+                    
+                    const start = performance.now();
+                    worker.postMessage({ job: [job[0], job[1]], difficulty: difficulty });
+
+                    worker.onmessage = (e) => {
+                        const end = performance.now();
+                        const nonce = e.data.result;
+                        const timeTaken = (end - start) / 1000;
+                        const hashrate = (nonce / timeTaken).toFixed(2);
+                        
+                        document.getElementById('hashrate').innerText = hashrate + " H/s";
+                        log(`found nonce: ${nonce} (${hashrate} H/s)`);
+                        
+                        socket.send(`${nonce},${hashrate},Official Web Miner 2.8,${rig},,${wallet_id}`);
+                    };
+                }
+                else if (data.includes("GOOD")) {
+                    document.getElementById('shares').innerText++;
+                    log("✅ Share Accepted!", "success");
+                    socket.send(`JOB,${username},LOW,${key}`);
+                }
+                else if (data.includes("BAD")) {
+                    log("❌ Rejected. (Bad Algo or Blocked)", "error");
+                    socket.send(`JOB,${username},LOW,${key}`);
+                }
+            };
+
+            socket.onerror = (err) => {
+                log("❌ Connection Failed. Port 14808 might be blocked?", "error");
+                stopMining();
+            };
+            
+            socket.onclose = () => {
+                 if(isMining) {
+                    log("⚠️ Disconnected. Retrying in 3s...", "error");
+                    setTimeout(() => { isMining=false; startMining(); }, 3000);
+                 }
+            };
+        }
+
+        function stopMining() {
+            isMining = false;
+            if(socket) socket.close();
+            if(worker) worker.terminate();
+            document.getElementById('poolName').innerText = "Stopped";
+            log("Miner Stopped.");
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Webchain Miner Dashboard</title>
+    <style>
+        body { font-family: 'Consolas', 'Monaco', monospace; background: #0d0d0d; color: #0f0; padding: 20px; }
+        h1 { margin-bottom: 5px; color: #fff; }
+        .dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 20px; }
+        .card { background: #1a1a1a; padding: 15px; border: 1px solid #333; border-radius: 5px; }
+        .card label { display: block; color: #888; font-size: 0.8em; margin-bottom: 5px; }
+        .card span { font-size: 1.2em; font-weight: bold; color: #eee; }
+        .success { color: #0f0 !important; }
+        .danger { color: #f44 !important; }
+        .info { color: #0ff !important; }
+        button { background: #004400; color: #0f0; border: 1px solid #0f0; padding: 10px 20px; cursor: pointer; font-family: inherit; font-size: 1em; }
+        button:hover { background: #006600; }
+        #log { border: 1px solid #333; height: 300px; overflow-y: scroll; background: #000; padding: 10px; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+    <h1>Webchain Miner ⛏️</h1>
+    <p style="color: #666; margin-top:0;">Protocol: MintMe | Mode: 32-bit Nonce</p>
+
+    <div class="dashboard">
+        <div class="card">
+            <label>HASHRATE</label>
+            <span id="hashrate" class="info">0.00</span> H/s
+        </div>
+        <div class="card">
+            <label>DIFFICULTY</label>
+            <span id="difficulty">Waiting...</span>
+        </div>
+        <div class="card">
+            <label>SHARES (ACC / REJ)</label>
+            <span id="acc" class="success">0</span> / <span id="rej" class="danger">0</span>
+        </div>
+        <div class="card">
+            <label>CURRENT JOB ID</label>
+            <span id="jobId" style="font-size: 0.9em;">None</span>
+        </div>
+        <div class="card">
+            <label>STATUS</label>
+            <span id="status" style="color: #888;">Disconnected</span>
+        </div>
+    </div>
+
+    <button id="btnConnect" onclick="toggleConnect()">Start Mining</button>
+    <br><br>
+    <div id="log"></div>
+
+    <script>
+        const PROXY_URL = "ws://127.0.0.1:8888";
+        const WALLET = "0xa733c9545a3476de410e7704d8be586d59db9c6d"; 
+
+        let socket, worker;
+        let batchHashes = 0, accepted = 0, rejected = 0, lastRateUpdate = Date.now();
+        let isConnected = false;
+
+        function log(msg, color='#888') {
+            const el = document.getElementById('log');
+            const d = document.createElement('div');
+            d.style.color = color;
+            d.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            el.prepend(d);
+        }
+
+        function toggleConnect() {
+            if (isConnected) disconnect();
+            else connect();
+        }
+
+        function disconnect() {
+            if (socket) socket.close();
+            if (worker) worker.terminate();
+            worker = null;
+            isConnected = false;
+            document.getElementById('btnConnect').innerText = "Start Mining";
+            document.getElementById('status').innerText = "Stopped";
+            document.getElementById('status').style.color = "red";
+        }
+
+        function initWorker() {
+            if (worker) return;
+            worker = new Worker('worker.js');
+            worker.onmessage = function(e) {
+                if (e.data.type === 'stats') {
+                    batchHashes += e.data.hashes;
+                    updateHashrate();
+                } else if (e.data.type === 'share') {
+                    log(`💎 Share Found! Nonce: ${e.data.nonce}`, 'cyan');
+                    // FIX: Pass the job_id from the worker back to the submit function
+                    submitShare(e.data.jobId, e.data.nonce, e.data.result);
+                }
+            };
+        }
+
+        function connect() {
+            initWorker();
+            log("Connecting to Proxy...", "#fff");
+            socket = new WebSocket(PROXY_URL);
+
+            socket.onopen = () => {
+                isConnected = true;
+                document.getElementById('btnConnect').innerText = "Stop Mining";
+                document.getElementById('status').innerText = "Connected";
+                document.getElementById('status').style.color = "gold";
+                
+                log("Logging in...", "#fff");
+                socket.send(JSON.stringify({
+                    id: 1,
+                    method: "login",
+                    params: { login: WALLET, pass: "x", agent: "webchain-miner/0.1" }
+                }));
+            };
+
+            socket.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                let jobObj = null;
+
+                // 1. Handle Login / Job
+                if (msg.id === 1 && msg.result && msg.result.status === 'OK') {
+                    log("✅ Login Accepted", "#0f0");
+                    document.getElementById('status').innerText = "Mining";
+                    document.getElementById('status').style.color = "#0f0";
+                    if (msg.result.job) jobObj = msg.result.job;
+                }
+                else if (msg.method === 'job') {
+                    jobObj = msg.params;
+                }
+
+                if (jobObj) {
+                    const shortId = jobObj.job_id.substring(0, 8) + "...";
+                    document.getElementById('jobId').innerText = shortId;
+                    
+                    // Calculate Difficulty
+                    if (jobObj.target) {
+                        const diff = calculateDifficulty(jobObj.target);
+                        document.getElementById('difficulty').innerText = diff.toLocaleString();
+                    }
+
+                    log(`📦 New Job: ${shortId} (Full: ${jobObj.job_id})`, "#888");
+                    worker.postMessage({ command: 'job', data: jobObj });
+                    worker.postMessage({ command: 'start' });
+                }
+
+                // 2. Handle Share Result
+                if (msg.id === 4) {
+                    console.log("Share response:", msg); // Debug
+                    if (msg.result && (msg.result.status === 'OK' || msg.result === true)) {
+                        accepted++;
+                        document.getElementById('acc').innerText = accepted;
+                        log("💰 Share Accepted!", "gold");
+                    } else {
+                        rejected++;
+                        document.getElementById('rej').innerText = rejected;
+                        const err = msg.error ? JSON.stringify(msg.error) : JSON.stringify(msg.result);
+                        log(`⚠️ Share Rejected: ${err}`, "orange");
+                    }
+                }
+            };
+            
+            socket.onclose = () => {
+                 isConnected = false;
+                 document.getElementById('status').innerText = "Disconnected";
+                 document.getElementById('status').style.color = "red";
+                 document.getElementById('btnConnect').innerText = "Start Mining";
+                 log("Socket Disconnected", "red");
+            };
+        }
+
+        // FIX: Added jobId to the parameters
+        function submitShare(jobId, nonce, result) {
+            console.log(`Submitting: Job=${jobId}, Nonce=${nonce}, Result=${result}`);
+            socket.send(JSON.stringify({
+                id: 4,
+                method: "submit",
+                params: { 
+                    id: WALLET,      // Add this!
+                    job_id: jobId, 
+                    nonce: nonce, 
+                    result: result 
+                }
+            }));
+        }
+
+        function updateHashrate() {
+            const now = Date.now();
+            if (now - lastRateUpdate >= 1000) {
+                const r = (batchHashes / ((now - lastRateUpdate)/1000)).toFixed(2);
+                document.getElementById('hashrate').innerText = r;
+                batchHashes = 0; lastRateUpdate = now;
+            }
+        }
+
+        function calculateDifficulty(targetHex) {
+            // Target is Little Endian Hex. Convert to BigInt.
+            // Diff = Max_Target / Target
+            // Max_Target for CryptoNote is 2^64 - 1
+            const max = 0xFFFFFFFFFFFFFFFFn;
+            
+            // Reverse hex for BigInt parsing
+            let beHex = "";
+            for (let i = targetHex.length - 2; i >= 0; i -= 2) beHex += targetHex.substr(i, 2);
+            
+            const targetVal = BigInt("0x" + beHex);
+            if (targetVal === 0n) return 0;
+            
+            return Number(max / targetVal);
+        }
+    </script>
+</body>
+</html>

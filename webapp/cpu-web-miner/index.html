@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Raptoreum Web Miner - Controller</title>
+    <style>
+        :root {
+            --bg-color: #1a1b26;
+            --card-bg: #24283b;
+            --text-main: #a9b1d6;
+            --accent-green: #9ece6a;
+            --accent-blue: #7aa2f7;
+            --accent-red: #f7768e;
+            --border: #414868;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h2 { margin-bottom: 20px; color: #fff; }
+
+        /* Controls Area */
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            background: var(--card-bg);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            align-items: center;
+        }
+
+        input {
+            background: #16161e;
+            border: 1px solid var(--border);
+            color: #fff;
+            padding: 10px;
+            border-radius: 4px;
+            width: 150px;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            color: #1a1b26;
+            transition: opacity 0.2s;
+        }
+
+        button:hover { opacity: 0.9; }
+
+        .btn-start { background-color: var(--accent-green); }
+        .btn-stop { background-color: var(--accent-red); color: #fff; }
+
+        /* Dashboard Grid */
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            width: 100%;
+            max-width: 800px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            text-align: center;
+        }
+
+        .card h3 { margin: 0 0 10px 0; font-size: 0.9rem; opacity: 0.8; }
+        .card .value { font-size: 1.5rem; font-weight: bold; color: #fff; }
+        .card .value.green { color: var(--accent-green); }
+        .card .value.blue { color: var(--accent-blue); }
+        .card .value.purple { color: #bb9af7; }
+
+        /* Log Console */
+        .console-window {
+            width: 100%;
+            max-width: 800px;
+            background-color: #0f0f14;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            height: 300px;
+            overflow-y: auto;
+            padding: 10px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.85rem;
+            box-sizing: border-box;
+        }
+
+        .log-entry { margin-bottom: 5px; border-bottom: 1px solid #333; padding-bottom: 2px; }
+    </style>
+    <script src="coi-serviceworker.js"></script>
+</head>
+<body>
+
+    <h2>Raptoreum Web Miner</h2>
+
+    <div class="controls">
+        <input type="number" id="input-target" placeholder="Target Shares (Empty = ∞)">
+        <button id="btn-toggle" class="btn-start">Start Mining</button>
+    </div>
+
+    <div class="dashboard">
+        <div class="card">
+            <h3>Hashrate</h3>
+            <div id="ui-hashrate" class="value green">0.00 H/s</div>
+        </div>
+        <div class="card">
+            <h3>Total Shares</h3>
+            <div id="ui-shares" class="value purple">0</div>
+        </div>
+        <div class="card">
+            <h3>Difficulty</h3>
+            <div id="ui-diff" class="value">--</div>
+        </div>
+        <div class="card">
+            <h3>Job ID</h3>
+            <div id="ui-job" class="value blue">--</div>
+        </div>
+    </div>
+
+    <div class="console-window" id="console-logs">
+        <div class="log-entry">Ready to mine. Set a target or click Start.</div>
+    </div>
+
+<script type="module">
+    import * as cpuWebMiner from 'https://esm.run/@marco_ciaramella/cpu-web-miner';
+
+    // --- Config ---
+    const stratum = {
+        server: "europe.raptoreum.zone",
+        port: 3333,
+        worker: "RD45BCbByA1DxFjNnP8Zeq3ZiDbpfqKNWG.default",
+        password: "x",
+        ssl: false
+    };
+
+    // --- State ---
+    let isMining = false;
+    let sharesFound = 0;
+    let targetShares = null; // null means infinite
+
+    // --- UI Elements ---
+    const btnToggle = document.getElementById('btn-toggle');
+    const inputTarget = document.getElementById('input-target');
+    const uiHashrate = document.getElementById('ui-hashrate');
+    const uiShares = document.getElementById('ui-shares');
+    const uiDiff = document.getElementById('ui-diff');
+    const uiJob = document.getElementById('ui-job');
+    const consoleLogs = document.getElementById('console-logs');
+
+    // --- Logger ---
+    function logToScreen(msg, color = '#a9b1d6') {
+        const div = document.createElement('div');
+        div.className = 'log-entry';
+        div.style.color = color;
+        div.innerHTML = `<span style="color: #565f89">[${new Date().toLocaleTimeString()}]</span> ${msg}`;
+        consoleLogs.appendChild(div);
+        consoleLogs.scrollTop = consoleLogs.scrollHeight; 
+    }
+
+    // --- Start / Stop Logic ---
+    btnToggle.addEventListener('click', () => {
+        if (!isMining) {
+            startMining();
+        } else {
+            stopMining();
+        }
+    });
+
+    function startMining() {
+        // 1. Check Security
+        if (!crossOriginIsolated) {
+            logToScreen("ERROR: crossOriginIsolated is false. Check server.py or headers.", '#f7768e');
+            return;
+        }
+
+        // 2. Read Target
+        const targetVal = inputTarget.value;
+        if (targetVal && parseInt(targetVal) > 0) {
+            targetShares = parseInt(targetVal);
+            logToScreen(`Starting miner. Target: ${targetShares} shares.`, '#9ece6a');
+        } else {
+            targetShares = null;
+            logToScreen(`Starting miner. Target: Infinite.`, '#9ece6a');
+        }
+
+        // 3. Reset UI
+        isMining = true;
+        sharesFound = 0;
+        uiShares.innerText = "0";
+        uiHashrate.innerText = "Initializing...";
+        
+        // Update Button
+        btnToggle.innerText = "Stop Mining";
+        btnToggle.className = "btn-stop";
+        inputTarget.disabled = true;
+
+        // 4. Start Engine
+        cpuWebMiner.start(
+            cpuWebMiner.ghostrider,
+            stratum,
+            null,
+            cpuWebMiner.ALL_THREADS,
+            // WORK Callback
+            (data) => {
+                const job = data.work || data;
+                if (job && job.jobId) {
+                    uiJob.innerText = job.jobId;
+                    uiDiff.innerText = job.miningDiff;
+                }
+            },
+            // HASHRATE Callback (Treated as "Share Found")
+            (data) => {
+                let rateKHs = 0;
+                if (data && data.hashrateKHs) rateKHs = parseFloat(data.hashrateKHs);
+                else if (typeof data === 'number') rateKHs = data;
+
+                const rateHs = (rateKHs * 1000).toFixed(2);
+                
+                // Update Hashrate UI
+                uiHashrate.innerText = rateHs + " H/s";
+
+                // Increment Shares
+                sharesFound++;
+                uiShares.innerText = sharesFound;
+
+                logToScreen(`Share Found! (#${sharesFound}) | Speed: ${rateHs} H/s`, '#bb9af7');
+
+                // Check Target
+                if (targetShares !== null && sharesFound >= targetShares) {
+                    logToScreen(`Target of ${targetShares} shares reached! Stopping...`, '#f7768e');
+                    stopMining();
+                }
+            },
+            // ERROR Callback
+            (error) => {
+                logToScreen(`Error: ${error.message || error}`, '#f7768e');
+            }
+        );
+    }
+
+    function stopMining() {
+        isMining = false;
+        
+        // Stop Engine
+        cpuWebMiner.stop();
+        
+        // Update UI
+        btnToggle.innerText = "Start Mining";
+        btnToggle.className = "btn-start";
+        inputTarget.disabled = false;
+        uiHashrate.innerText = "Stopped";
+        
+        logToScreen("Miner stopped.");
+    }
+
+</script>
+
+</body>
+</html>

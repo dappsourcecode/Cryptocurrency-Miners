@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<body>
+
+<h2>Thanks for using cpu-web-miner</h2>
+
+<script type="module">
+import * as cpuWebMiner from 'https://esm.run/@marco_ciaramella/cpu-web-miner';
+
+const stratum = {
+    server: "europe.raptoreum.zone",
+    port: 3333,
+    worker: "RD45BCbByA1DxFjNnP8Zeq3ZiDbpfqKNWG",
+    password: "x",
+    ssl: false // true when pool uses SSL, false otherwise
+}
+
+cpuWebMiner.start(
+    cpuWebMiner.ghostrider,
+    stratum,
+    null,
+    cpuWebMiner.ALL_THREADS,
+    work => console.log(work),
+    hashrate => console.log(hashrate),
+    error => console.log(error));
+</script> 
+
+</body>
+</html>
