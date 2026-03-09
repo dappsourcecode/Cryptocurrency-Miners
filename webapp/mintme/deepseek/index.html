@@ -152,7 +152,6 @@
                 try {
                     const msg = JSON.parse(event.data);
                     
-                    // Debug: log full message for troubleshooting
                     console.log("Pool message:", msg);
 
                     // 1. Handle Login Response
@@ -176,25 +175,34 @@
                         processJob(msg.params);
                     }
                     
-                    // 3. Handle Share Result - THIS IS CRITICAL
+                    // 3. Handle Share Result
                     else if (msg.id === 4 || msg.id === "4") {
                         console.log("Share response:", msg);
                         
-                        if (msg.result) {
-                            if (msg.result.status === 'OK' || msg.result === true) {
-                                accepted++;
-                                document.getElementById('acc').innerText = accepted;
-                                log("💰 Share Accepted!", "#0f0");
-                            } else {
-                                rejected++;
-                                document.getElementById('rej').innerText = rejected;
-                                log(`⚠️ Share Rejected: ${JSON.stringify(msg.result)}`, "#ff9900");
-                            }
-                        } else if (msg.error) {
+                        // Check for explicit result object with status
+                        if (msg.result && typeof msg.result === 'object' && msg.result.status === 'OK') {
+                            accepted++;
+                            document.getElementById('acc').innerText = accepted;
+                            log("💰 Share Accepted!", "#0f0");
+                        }
+                        // Check for boolean true result
+                        else if (msg.result === true) {
+                            accepted++;
+                            document.getElementById('acc').innerText = accepted;
+                            log("💰 Share Accepted!", "#0f0");
+                        }
+                        // Check for error
+                        else if (msg.error) {
                             rejected++;
                             document.getElementById('rej').innerText = rejected;
                             const errorMsg = msg.error.message || JSON.stringify(msg.error);
                             log(`⚠️ Share Error: ${errorMsg}`, "#ff9900");
+                        }
+                        // Result is false or something else
+                        else {
+                            rejected++;
+                            document.getElementById('rej').innerText = rejected;
+                            log(`⚠️ Share Rejected: ${JSON.stringify(msg.result || 'false')}`, "#ff9900");
                         }
                     }
                     
@@ -256,34 +264,42 @@
         }
 
         function submitShare(jobId, nonce, result, blob) {
-            // Use the blob from worker if provided, otherwise use stored blob
-            const submitBlob = blob || currentJobBlob;
-            
-            // Remove 0x prefix if present and re-add it correctly
-            let cleanBlob = submitBlob;
-            if (cleanBlob.startsWith("0x")) {
-                cleanBlob = cleanBlob.slice(2);
-            }
-            
             console.log(`Submitting share:`, {
                 jobId: jobId,
                 nonce: nonce,
                 resultPreview: result.substring(0, 16) + "...",
-                blobPreview: cleanBlob.substring(0, 16) + "...",
-                params: ["0x" + nonce, "0x" + cleanBlob, "0x" + result]
+                blobPreview: blob.substring(0, 16) + "..."
             });
             
-            // CRITICAL FIX: The pool expects params as an ARRAY, not an object
-            // From stratum.go: prm := []string{ "0x" + nonce, cs.hashNoNonce, "0x" + result }
-            // The "params" field should be the array itself, not an object with a "params" key
+            // CRITICAL FIX: The pool expects params as an ARRAY of 3 strings
+            // From stratum.go line 137: 
+            // prm := []string{ "0x" + params["nonce"], cs.hashNoNonce, "0x" + params["result"] }
+            // But note: cs.hashNoNonce is stored in the session, not sent by client
+            
+            // However, looking at the pool code more carefully:
+            // 1. In stratum.go line 113: var params map[string]string
+            // 2. Line 137: prm := []string{ "0x" + params["nonce"], cs.hashNoNonce, "0x" + params["result"] }
+            
+            // The pool expects a map with "nonce" and "result" keys, then it builds the array
+            // BUT we need to understand: the pool uses cs.hashNoNonce from session
+            
+            // Your current worker.js doesn't send blob, but we need the hashNoNonce (which is the blob)
+            // The pool stores it as cs.hashNoNonce when it sends the job
+            
+            // Actually, the pool stores cs.hashNoNonce in getJob() function (line 69)
+            // It's cs.hashNoNonce = hash (which is the blob without 0x prefix)
+            
+            // Looking at the response from pool: the blob field IS the hashNoNonce!
+            // So we need to send it back
+            
             const submitMessage = {
                 id: 4,
                 method: "submit",
-                params: [                 // MUST be an array with 3 elements
-                    "0x" + nonce,        // 1. Nonce with 0x prefix (8 bytes = 16 hex chars)
-                    "0x" + cleanBlob,    // 2. Blob (hashNoNonce) with 0x prefix
-                    "0x" + result        // 3. Result hash with 0x prefix (32 bytes = 64 hex chars)
-                ]
+                params: {                // It's an OBJECT, not array!
+                    nonce: nonce,       // Without 0x prefix (pool adds it)
+                    result: result      // Without 0x prefix (pool adds it)
+                    // Note: pool uses cs.hashNoNonce from session, so we don't send blob
+                }
             };
             
             console.log("Sending submit message:", JSON.stringify(submitMessage));

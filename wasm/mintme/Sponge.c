@@ -401,5 +401,3 @@ void reducedDuplexRow(uint64_t *state, uint64_t *rowIn, uint64_t *rowInOut, uint
 		ptrWordIn += BLOCK_LEN_INT64;
 	}
 }
-
-////////////////////////////////////////////////////////////////////////////////////////////////

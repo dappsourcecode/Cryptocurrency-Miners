@@ -1,10 +1,10 @@
-// worker.js - FINAL CORRECTED VERSION
+// worker.js - FIXED NONCE POSITION
 importScripts('mintme_miner.js');
 
 let Module = null;
 let currentJob = null;
 let currentTimeCost = 1;
-let currentBlobHex = "";
+let currentSeedHex = "";
 let nonce = 0n;
 let target = 0n;
 let isMining = false;
@@ -36,41 +36,44 @@ onmessage = function(e) {
         miningGeneration++;
         currentJob = newJob;
 
-        // Store the blob (hashNoNonce) for submission
-        currentBlobHex = currentJob.blob;
-        if (currentBlobHex.startsWith("0x")) {
-            currentBlobHex = currentBlobHex.slice(2);
+        currentSeedHex = currentJob.blob;
+        if (currentSeedHex.startsWith("0x")) {
+            currentSeedHex = currentSeedHex.slice(2);
         }
 
         // Determine time_cost based on algorithm
-        currentTimeCost = 1; // default for lyra2v2
+        currentTimeCost = 1;
         if (currentJob.algo) {
             if (currentJob.algo.includes("lyra2-webchain") && 
                 !currentJob.algo.includes("lyra2v2")) {
-                currentTimeCost = 4; // original lyra2
+                currentTimeCost = 4;
             }
             console.log("Using algorithm:", currentJob.algo, "timeCost:", currentTimeCost);
         }
 
         // Load blob into memory
-        const blobBytes = hexToBytes(currentBlobHex);
+        const blobBytes = hexToBytes(currentSeedHex);
         Module.HEAPU8.set(blobBytes, inputPtr);
 
-        // Parse target (little-endian hex to BigInt)
+        // Parse target
         if (currentJob.target) {
             let targetHex = currentJob.target;
             if (targetHex.startsWith("0x")) targetHex = targetHex.slice(2);
-            // Convert little-endian to big-endian for comparison
             target = BigInt("0x" + reverseHex(targetHex));
-            console.log("Target:", target.toString(16));
         } else {
             target = 0xFFFFFFFFFFFFFFFFn;
         }
 
-        // Use 64-bit random starting nonce (8 bytes)
+        // Random starting nonce
         nonce = BigInt(Math.floor(Math.random() * 0xFFFFFFFFFFFFFFFF));
-        console.log("New job. Nonce start:", nonce.toString(16), 
-                   "Blob length:", currentBlobHex.length/2, "bytes");
+        
+        console.log("New job. Blob length:", currentSeedHex.length/2, "bytes");
+        console.log("Blob preview:", currentSeedHex.substring(0, 100));
+        
+        // CRITICAL: Find the nonce position
+        // In Ethereum headers, nonce is the LAST 8 bytes
+        const blobLen = currentSeedHex.length / 2;
+        console.log("Nonce should be at byte:", blobLen - 8, "(last 8 bytes)");
     }
 };
 
@@ -82,8 +85,8 @@ function mineLoop() {
 
     const batchSize = 500;
     const view = Module.HEAPU8;
-    const nonceOffset = 39; // 8-byte nonce position
-    const blobLen = currentBlobHex.length / 2; // Actual byte length
+    const blobLen = currentSeedHex.length / 2;
+    const nonceOffset = blobLen - 8;
 
     const generation = miningGeneration;
     const jobId = currentJob.job_id;
@@ -91,9 +94,9 @@ function mineLoop() {
     for (let i = 0; i < batchSize; i++) {
         if (generation !== miningGeneration) break;
 
-        // 1. Write 8-byte Nonce (Little Endian)
+        // 1. Write 8-byte Nonce (BIG ENDIAN!)
         for (let b = 0; b < 8; b++) {
-            view[inputPtr + nonceOffset + b] = Number((nonce >> BigInt(b * 8)) & 0xFFn);
+            view[inputPtr + nonceOffset + b] = Number((nonce >> BigInt((7 - b) * 8)) & 0xFFn);
         }
 
         // 2. Hash with correct time_cost
@@ -103,32 +106,42 @@ function mineLoop() {
         const hashVal = getLast64BitsLittleEndian(outputPtr);
 
         if (hashVal <= target) {
-            // 4. Prepare nonce hex (8 bytes, 16 chars)
-            let nHex = "";
-            for (let b = 0; b < 8; b++) {
-                nHex += view[inputPtr + nonceOffset + b].toString(16).padStart(2, '0');
-            }
+            // 4. Nonce for submission (already in correct format from counter)
+            let nHex = nonce.toString(16).padStart(16, '0');
 
-            // 5. Prepare result hash (32 bytes, 64 chars)
+            // 5. Prepare result hash
             let resultHex = "";
             for (let b = 0; b < 32; b++) {
                 resultHex += view[outputPtr + b].toString(16).padStart(2, '0');
             }
 
-            console.log("Share found! Nonce:", nHex, "Hash:", hashVal.toString(16));
+            // Debug
+            let nHexInBlob = "";
+            for (let b = 0; b < 8; b++) {
+                nHexInBlob += view[inputPtr + nonceOffset + b].toString(16).padStart(2, '0');
+            }
             
+            console.log("=== SHARE FOUND ===");
+            console.log("Nonce counter:", nonce.toString(16));
+            console.log("Nonce in blob (BE):", nHexInBlob);
+            console.log("Nonce for submit:", nHex);
+            console.log("Result hash:", resultHex);
+            console.log("Hash value (last 64 bits):", hashVal.toString(16));
+            console.log("Target:", target.toString(16));
+            console.log("===================");
+            
+            // In worker.js, update the postMessage for share:
             if (generation === miningGeneration) {
                 postMessage({
                     type: 'share',
                     jobId: jobId,
                     nonce: nHex,
                     result: resultHex,
-                    blob: currentBlobHex  // Send blob for submission
+                    blob: currentSeedHex  // Add this line
                 });
             }
         }
 
-        // Increment 64-bit nonce
         nonce++;
     }
 

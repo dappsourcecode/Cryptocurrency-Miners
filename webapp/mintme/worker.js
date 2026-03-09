@@ -1,4 +1,4 @@
-// worker.js - Perfected Native Parity
+// worker.js - Native Code Parity
 importScripts('mintme_miner.js');
 
 let Module = null;
@@ -8,8 +8,7 @@ let nonce = 0n;
 let target = 0n;
 let isMining = false;
 let inputPtr, outputPtr;
-let pristineBlob = null;
-let miningGeneration = 0; // Added to prevent stale shares
+let pristineBlob = null; // 1. ADD THIS GLOBAL VARIABLE
 
 const INPUT_SIZE = 2048;
 const OUTPUT_SIZE = 32;
@@ -30,11 +29,9 @@ onmessage = function(e) {
         if (!isMining) { isMining = true; mineLoop(); }
     } else if (msg.command === 'job') {
         currentJob = msg.data;
-        miningGeneration++; // Increment generation on new job
-        
         let blobHex = currentJob.blob.startsWith("0x") ? currentJob.blob.slice(2) : currentJob.blob;
         
-        pristineBlob = hexToBytes(blobHex);
+        pristineBlob = hexToBytes(blobHex); // 2. SAVE THE PRISTINE BLOB HERE
         Module.HEAPU8.set(pristineBlob, inputPtr);
 
         currentTimeCost = 1; 
@@ -62,33 +59,25 @@ onmessage = function(e) {
 };
 
 function mineLoop() {
-    if (!isMining || !currentJob || !pristineBlob) { setTimeout(mineLoop, 100); return; }
+    if (!isMining || !currentJob || !pristineBlob) { setTimeout(mineLoop, 100); return; } // 3. ENSURE PRISTINE BLOB EXISTS
 
     const batchSize = 500;
     const view = Module.HEAPU8;
-    const blobLen = pristineBlob.length; 
+    const blobLen = pristineBlob.length; // 4. GET LEN DIRECTLY FROM ARRAY
     const nonceOffset = blobLen - 8; 
-    
-    // Lock in the current generation for this batch
-    const currentGen = miningGeneration;
 
     for (let i = 0; i < batchSize; i++) {
-        // Stop hashing immediately if a new job arrived
-        if (currentGen !== miningGeneration) break;
         
-        // Restore pristine blob
+        // 5. CRITICAL FIX: RESTORE THE PRISTINE BLOB MEMORY BEFORE HASHING
         view.set(pristineBlob, inputPtr);
 
-        // Write Nonce
         for (let b = 0; b < 8; b++) {
             view[inputPtr + nonceOffset + b] = Number((nonce >> BigInt(b * 8)) & 0xFFn);
         }
 
         Module.hash_data(inputPtr, outputPtr, blobLen, currentTimeCost);
 
-        // CRITICAL FIX: Since bridge.cpp reversed the array, the most significant bytes 
-        // for difficulty checking are now at the front (indices 0 to 7).
-        const hashVal = getHashValueFromReversedArray(outputPtr);
+        const hashVal = getLast64BitsLittleEndian(outputPtr);
 
         if (hashVal <= target) {
             let nHex = "";
@@ -96,7 +85,6 @@ function mineLoop() {
                 nHex += view[inputPtr + nonceOffset + b].toString(16).padStart(2, '0');
             }
             
-            // Linear read generates the correct string because C++ already reversed it
             let resultHex = "";
             for (let b = 0; b < 32; b++) {
                 resultHex += view[outputPtr + b].toString(16).padStart(2, '0');
@@ -129,12 +117,9 @@ function reverseHex(hex) {
     return out;
 }
 
-// CRITICAL FIX: Read the first 8 bytes linearly because the array is reversed
-function getHashValueFromReversedArray(ptr) {
+function getLast64BitsLittleEndian(ptr) {
     const view = Module.HEAPU8;
     let hex = "0x";
-    for (let i = 0; i < 8; i++) {
-        hex += view[ptr + i].toString(16).padStart(2, '0');
-    }
+    for (let i = 31; i >= 24; i--) hex += view[ptr + i].toString(16).padStart(2, '0');
     return BigInt(hex);
 }

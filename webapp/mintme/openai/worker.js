@@ -1,117 +1,179 @@
-// worker.js - FINAL FIX
+// worker.js - FIXED NONCE POSITION
 importScripts('mintme_miner.js');
 
 let Module = null;
 let currentJob = null;
+let currentTimeCost = 1;
+let currentSeedHex = "";
 let nonce = 0n;
 let target = 0n;
 let isMining = false;
 let inputPtr, outputPtr;
+let miningGeneration = 0;
+let jobSize = 0;
 
-const INPUT_SIZE = 2048; 
+const INPUT_SIZE = 2048;
 const OUTPUT_SIZE = 32;
 
 createMintMeModule().then(instance => {
     Module = instance;
     inputPtr = Module._malloc(INPUT_SIZE);
     outputPtr = Module._malloc(OUTPUT_SIZE);
-    Module.hash_data = Module.cwrap('hash_data', 'void', ['number', 'number', 'number']);
+    Module.hash_data = Module.cwrap('hash_data', 'void', ['number', 'number', 'number', 'number']);
     postMessage({ type: 'ready' });
 });
 
 onmessage = function(e) {
     const msg = e.data;
-    if (!Module) return; 
-    
+    if (!Module) return;
+
     if (msg.command === 'start') {
         if (!isMining) { isMining = true; mineLoop(); }
     }
     else if (msg.command === 'job') {
         const newJob = msg.data;
         if (currentJob && currentJob.job_id === newJob.job_id) return;
-        currentJob = newJob;
 
-        const blobBytes = hexToBytes(currentJob.blob);
+        miningGeneration++;
+        currentJob = newJob;
+        jobSize = currentJob.size || (currentJob.blob.length / 2);
+
+        currentSeedHex = currentJob.blob;
+        if (currentSeedHex.startsWith("0x")) {
+            currentSeedHex = currentSeedHex.slice(2);
+        }
+
+        // Determine time_cost based on algorithm
+        currentTimeCost = 1;
+        if (currentJob.algo) {
+            if (currentJob.algo.includes("lyra2-webchain") && 
+                !currentJob.algo.includes("lyra2v2")) {
+                currentTimeCost = 4;
+            }
+            console.log("Using algorithm:", currentJob.algo, "timeCost:", currentTimeCost);
+        }
+
+        // Load blob into memory
+        const blobBytes = hexToBytes(currentSeedHex);
         Module.HEAPU8.set(blobBytes, inputPtr);
 
+        // Parse target
         if (currentJob.target) {
-            target = BigInt("0x" + reverseHex(currentJob.target));
+            let targetHex = currentJob.target;
+            if (targetHex.startsWith("0x")) targetHex = targetHex.slice(2);
+            target = BigInt("0x" + reverseHex(targetHex));
         } else {
             target = 0xFFFFFFFFFFFFFFFFn;
         }
-        // Use 32-bit random starting nonce
-        nonce = BigInt(Math.floor(Math.random() * 0xFFFFFFFF));
+
+        // Random starting nonce
+        nonce = BigInt(Math.floor(Math.random() * 0xFFFFFFFFFFFFFFFF));
+        
+        console.log("New job. Blob length:", currentSeedHex.length/2, "bytes");
+        console.log("Blob preview:", currentSeedHex.substring(0, 100));
+        
+        // CRITICAL: Find the nonce position
+        // In Ethereum headers, nonce is the LAST 8 bytes
+        const blobLen = currentSeedHex.length / 2;
+        console.log("Nonce should be at byte:", blobLen - 8, "(last 8 bytes)");
     }
 };
 
-// Inside worker.js
 function mineLoop() {
-    if (!isMining || !currentJob || !target || !Module) { setTimeout(mineLoop, 100); return; }
+    if (!isMining || !currentJob || !target || !Module) {
+        setTimeout(mineLoop, 100);
+        return;
+    }
 
-    const batchSize = 500; 
+    const batchSize = 500;
     const view = Module.HEAPU8;
-    const nonceOffset = 39; // Ensure this matches your pool's blob structure
-    const blobLen = currentJob.blob.length / 2;
+    const blobLen = currentSeedHex.length / 2;
+    const nonceOffset = blobLen - 8;
+
+    const generation = miningGeneration;
+    const jobId = currentJob.job_id;
 
     for (let i = 0; i < batchSize; i++) {
-        // 1. Write 8-byte Nonce (Little Endian) [cite: 35, 39]
-        for (let b = 0; b < 8; b++) {
-            view[inputPtr + nonceOffset + b] = Number((nonce >> BigInt(b * 8)) & 0xFFn);
-        }
-        
-        // 2. Hash
-        Module.hash_data(inputPtr, outputPtr, blobLen);
-        
-        // 3. Check Target
-        if (getLast64BitsLittleEndian(outputPtr) <= target) {
-            const hashHex = getFullHashHexString(outputPtr); // in-memory order (0..31)
-            
-            // POOL EXPECTS: little-endian byte order for the 'result' field (LSB first).
-            // So we reverse the 32-byte hash by 2-hex-digit pairs:
-            const resultLE = reverseHex(hashHex);
+        if (generation !== miningGeneration) break;
 
-            // 4. Generate 16-character Little-Endian Nonce Hex (same as before)
-            let nHex = "";
-            for (let b = 0; b < 8; b++) {
-                nHex += view[inputPtr + nonceOffset + b].toString(16).padStart(2, '0');
+        // 1. Write 8-byte Nonce (BIG ENDIAN!)
+        for (let b = 0; b < 8; b++) {
+            view[inputPtr + nonceOffset + b] = Number((nonce >> BigInt((7 - b) * 8)) & 0xFFn);
+        }
+
+        // 2. Hash with correct time_cost
+        //Module.hash_data(inputPtr, outputPtr, blobLen, currentTimeCost);
+        //Module.hash_data(inputPtr, outputPtr, jobSize, currentTimeCost);
+        Module.hash_data(inputPtr, outputPtr, jobSize);
+
+
+        // 3. Check Target
+        const hashVal = getLast64BitsLittleEndian(outputPtr);
+
+        if (hashVal <= target) {
+            // 4. Nonce for submission (already in correct format from counter)
+            let nHex = nonce.toString(16).padStart(16, '0');
+
+            // 5. Prepare result hash
+            let resultHex = "";
+            for (let b = 0; b < 32; b++) {
+                resultHex += view[outputPtr + b].toString(16).padStart(2, '0');
             }
 
-            // Send the *reversed* hash as 'result'
-            postMessage({ 
-                type: 'share', 
-                jobId: currentJob.job_id, 
-                nonce: nHex, 
-                result: resultLE 
-            });
+            // Debug
+            let nHexInBlob = "";
+            for (let b = 0; b < 8; b++) {
+                nHexInBlob += view[inputPtr + nonceOffset + b].toString(16).padStart(2, '0');
+            }
+            
+            console.log("=== SHARE FOUND ===");
+            console.log("Nonce counter:", nonce.toString(16));
+            console.log("Nonce in blob (BE):", nHexInBlob);
+            console.log("Nonce for submit:", nHex);
+            console.log("Result hash:", resultHex);
+            console.log("Hash value (last 64 bits):", hashVal.toString(16));
+            console.log("Target:", target.toString(16));
+            console.log("===================");
+            
+            if (generation === miningGeneration) {
+                postMessage({
+                    type: 'share',
+                    jobId: jobId,
+                    nonce: nHex,
+                    result: resultHex
+                });
+            }
         }
-        
-        nonce++; // BigInt handles 64-bit naturally in JS [cite: 36]
+
+        nonce++;
     }
 
     postMessage({ type: 'stats', hashes: batchSize });
     setTimeout(mineLoop, 0);
 }
 
-// Helpers
+// Helper functions
 function hexToBytes(hex) {
     const bytes = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < hex.length; i += 2) bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+    for (let i = 0; i < hex.length; i += 2) {
+        bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+    }
     return bytes;
 }
+
 function reverseHex(hex) {
     let out = "";
-    for (let i = hex.length - 2; i >= 0; i -= 2) out += hex.substr(i, 2);
+    for (let i = hex.length - 2; i >= 0; i -= 2) {
+        out += hex.substr(i, 2);
+    }
     return out;
 }
-function getFullHashHexString(ptr) {
-    let hex = "";
-    for (let i = 0; i < 32; i++) hex += Module.HEAPU8[ptr + i].toString(16).padStart(2, '0');
-    return hex;
-}
+
 function getLast64BitsLittleEndian(ptr) {
     const view = Module.HEAPU8;
     let hex = "0x";
-    // Interprets bytes 24-31 as a 64-bit LE integer
-    for(let i=31; i>=24; i--) hex += view[ptr + i].toString(16).padStart(2, '0');
+    for (let i = 31; i >= 24; i--) {
+        hex += view[ptr + i].toString(16).padStart(2, '0');
+    }
     return BigInt(hex);
 }

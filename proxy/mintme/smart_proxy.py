@@ -8,8 +8,8 @@ import traceback
 # --- CONFIGURATION ---
 LISTEN_PORT = 8888
 POOL_URL = "pool.webchain.network" 
-POOL_PORT = 3333  # standard port
-# POOL_PORT = 2222  # lower difficulty port
+# POOL_PORT = 3333  # standard port
+POOL_PORT = 2222  # lower difficulty port
 
 
 # --- STATE TRACKING ---
