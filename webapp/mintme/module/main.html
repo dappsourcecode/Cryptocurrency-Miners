@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Zero-Liquidity Bench Marking Test</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f4f9; padding: 40px; text-align: center; }
+        .checkout-box { background: #fff; border-radius: 10px; padding: 30px; max-width: 450px; margin: 0 auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        h2 { margin-top: 0; color: #333; }
+        
+        .progress-bar-container { background: #eee; border-radius: 20px; width: 100%; height: 25px; margin: 20px 0; overflow: hidden; }
+        .progress-bar { background: #4CAF50; height: 100%; width: 0%; transition: width 0.3s; }
+        
+        button { background: #007BFF; color: #fff; border: none; padding: 12px 25px; border-radius: 5px; cursor: pointer; font-size: 1em; font-weight: bold; width: 100%; margin-bottom: 20px;}
+        button:hover { background: #0056b3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+
+        .feedback-panel { background: #1a1a1a; border-radius: 5px; padding: 15px; text-align: left; }
+        .hashrate-display { color: #0ff; font-family: 'Consolas', monospace; font-weight: bold; font-size: 1.1em; margin-bottom: 10px; display: block; border-bottom: 1px solid #333; padding-bottom: 10px;}
+        .log-box { height: 120px; overflow-y: scroll; font-family: 'Consolas', monospace; font-size: 0.8em; color: #888; }
+        .log-box div { margin-bottom: 4px; }
+
+        /* New Slider Styles */
+        .thread-slider-container { margin: 15px 0; text-align: left; }
+        .thread-slider-container label { font-size: 0.9em; font-weight: bold; color: #555; }
+        input[type=range] { width: 100%; margin-top: 8px; }
+    </style>
+    <script src="MintMeWasmMiner.js"></script>
+</head>
+<body>
+
+    <div class="checkout-box">
+        <h2>Unlock Function</h2>
+        <p style="color: #666; font-size: 0.9em;">Price: 10 Computed Shares</p>
+        <p style="color: #888; font-size: 0.8em;">No credit card required. Keep this tab open to attest your device's computation.</p>
+
+        <div class="thread-slider-container">
+            <label for="threadSlider">CPU Threads Dedicated: <span id="threadCountDisplay" style="color: #007BFF;">1</span></label>
+            <input type="range" id="threadSlider" min="1" max="4" value="1" oninput="document.getElementById('threadCountDisplay').innerText = this.value;">
+        </div>
+
+        <div class="progress-bar-container">
+            <div id="paymentProgress" class="progress-bar"></div>
+        </div>
+        <p id="statusText" style="font-weight: bold;">0 / 10 Shares Mined</p>
+
+        <button id="btnCheckout" onclick="initiateCheckout()">Start Computational Payment</button>
+
+        <div class="feedback-panel">
+            <span class="hashrate-display">Speed: <span id="uiHashrate">0.00</span> H/s</span>
+            <div id="uiLogBox" class="log-box">
+                <div>[System] Waiting to start...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- CPU Detection Logic ---
+        const maxThreads = navigator.hardwareConcurrency || 4; // Fallback to 4 if API blocked
+        const threadSlider = document.getElementById('threadSlider');
+        threadSlider.max = maxThreads;
+        
+        // Default to half of available cores, but at least 1
+        const defaultThreads = Math.max(1, Math.floor(maxThreads / 2));
+        threadSlider.value = defaultThreads;
+        document.getElementById('threadCountDisplay').innerText = defaultThreads;
+
+
+        // 1. Define the Business Logic Controller
+        class ZeroLiquidityCheckout {
+            constructor(config) {
+                this.targetPrice = config.targetPrice;
+                this.payment = 0;
+                this.pricingMetric = config.pricingMetric; 
+                this.mainMining = config.mainMining; 
+                this.mainItemDelivery = config.mainItemDelivery;
+            }
+
+            startPayment() {
+                this.mainMining.start((minedAmount) => {
+                    this.monitorProgress(minedAmount);
+                });
+            }
+
+            monitorProgress(minedAmount) {
+                this.payment += minedAmount;
+                const percentage = Math.min((this.payment / this.targetPrice) * 100, 100);
+                document.getElementById('paymentProgress').style.width = percentage + "%";
+                document.getElementById('statusText').innerText = `${this.payment} / ${this.targetPrice} Shares Mined`;
+
+                if (this.payment >= this.targetPrice) {
+                    this.mainMining.stop();            
+                    this.mainItemDelivery.execute();  
+                }
+            }
+        }
+
+        // 2. Define Delivery Mechanism
+        class FileUnlockDelivery {
+            constructor(filename) {
+                this.filename = filename;
+            }
+            execute() {
+                document.getElementById('btnCheckout').innerText = "Download Unlocked!";
+                document.getElementById('btnCheckout').style.background = "#28a745";
+                document.getElementById('statusText').innerText = "Payment Complete!";
+                alert(`Success! Delivery executed for: ${this.filename}`);
+            }
+        }
+
+        // 3. Initialize Mining Engine & Bind UI Hooks
+        const minerEngine = new MintMeWasmMiner(
+            'ws://127.0.0.1:8888', 
+            '0xa733c9545a3476de410e7704d8be586d59db9c6d', 
+            'client-checkout'
+        );
+
+        minerEngine.setUIHooks(
+            (logMessage) => {
+                const el = document.getElementById('uiLogBox');
+                const d = document.createElement('div');
+                d.innerText = `[${new Date().toLocaleTimeString()}] ${logMessage}`;
+                el.prepend(d); 
+            },
+            (hashrate) => {
+                document.getElementById('uiHashrate').innerText = hashrate;
+            }
+        );
+
+        const myCheckout = new ZeroLiquidityCheckout({
+            targetPrice: 10, 
+            pricingMetric: "shares",
+            mainMining: minerEngine, 
+            mainItemDelivery: new FileUnlockDelivery('premium_file.pdf') 
+        });
+
+        // UI Trigger
+        function initiateCheckout() {
+            // Lock the thread slider and button so user can't change it while mining
+            document.getElementById('btnCheckout').disabled = true;
+            document.getElementById('threadSlider').disabled = true;
+            document.getElementById('btnCheckout').innerText = "Attesting Computation...";
+            
+            // Pass the user's thread choice into the engine
+            const selectedThreads = parseInt(document.getElementById('threadSlider').value);
+            minerEngine.setThreadCount(selectedThreads);
+            
+            myCheckout.startPayment();
+        }
+    </script>
+</body>
+</html>

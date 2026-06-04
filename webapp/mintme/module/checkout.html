@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Zero-Liquidity Premium Content</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f4f9; padding: 40px; text-align: center; }
+        .checkout-box { background: #fff; border-radius: 10px; padding: 30px; max-width: 450px; margin: 0 auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1); position: relative; }
+        h2 { margin-top: 0; color: #333; }
+        
+        .progress-bar-container { background: #eee; border-radius: 20px; width: 100%; height: 25px; margin: 20px 0; overflow: hidden; }
+        .progress-bar { background: #4CAF50; height: 100%; width: 0%; transition: width 0.3s; }
+        
+        button { background: #007BFF; color: #fff; border: none; padding: 12px 25px; border-radius: 5px; cursor: pointer; font-size: 1em; font-weight: bold; width: 100%; margin-bottom: 20px; transition: background 0.2s;}
+        button:hover { background: #0056b3; }
+        button:disabled { background: #ccc !important; cursor: not-allowed; }
+        
+        /* Dynamic Button States */
+        .btn-pause { background: #ff9800 !important; }
+        .btn-pause:hover { background: #e68a00 !important; }
+        .btn-success { background: #28a745 !important; }
+
+        .feedback-panel { background: #1a1a1a; border-radius: 5px; padding: 15px; text-align: left; }
+        .hashrate-display { color: #0ff; font-family: 'Consolas', monospace; font-weight: bold; font-size: 1.1em; margin-bottom: 10px; display: block; border-bottom: 1px solid #333; padding-bottom: 10px;}
+        .log-box { height: 120px; overflow-y: scroll; font-family: 'Consolas', monospace; font-size: 0.8em; color: #888; }
+        .log-box div { margin-bottom: 4px; }
+
+        .thread-slider-container { margin: 15px 0; text-align: left; }
+        .thread-slider-container label { font-size: 0.9em; font-weight: bold; color: #555; }
+        input[type=range] { width: 100%; margin-top: 8px; }
+
+        /* --- NEW MODAL (POP-UP) STYLES --- */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center; }
+        .modal-content { background: #fff; padding: 25px; border-radius: 8px; max-width: 500px; text-align: left; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+        .modal-content h3 { margin-top: 0; color: #d32f2f; }
+        .warning-box { background: #ffebee; border-left: 4px solid #f44336; padding: 10px; margin: 15px 0; font-size: 0.9em; color: #c62828; }
+        .transparency-box { background: #f5f5f5; border: 1px solid #ddd; padding: 10px; font-size: 0.85em; color: #555; font-family: monospace; margin-bottom: 20px;}
+        .modal-buttons { display: flex; gap: 10px; }
+        .btn-consent { background: #4CAF50; flex: 1; }
+        .btn-consent:hover { background: #388E3C; }
+        .btn-decline { background: #9e9e9e; flex: 1; }
+        .btn-decline:hover { background: #757575; }
+    </style>
+    <script src="MintMeWasmMiner.js"></script>
+</head>
+<body>
+
+    <div id="consentModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3>Computation Consent Required</h3>
+            <p style="font-size: 0.95em; color: #333;">To access this content without a fiat payment, this website requests permission to use a portion of your device's processing power (CPU) to perform cryptographic calculations.</p>
+            
+            <div class="warning-box">
+                <strong>Hardware Impact Warning:</strong><br>
+                Running this process will utilize your processor. On mobile devices or laptops, this may result in increased battery drain, higher electricity consumption, and increased device temperature. You have full control and can adjust the processing intensity (thread count) or stop the process entirely at any time.
+            </div>
+
+            <div class="transparency-box">
+                <strong>Transparency Details:</strong><br><br>
+                <strong>Action:</strong> Attesting computational shares to unlock content.<br>
+                <strong>Network:</strong> MintMe (Lyra2v2 Webchain)<br>
+                <strong>Pool:</strong> pool.mintme.com:2222<br>
+                <strong>Destination:</strong> 0xa733c9545a3476de410e7704d8be586d59db9c6d
+            </div>
+
+            <div class="modal-buttons">
+                <button class="btn-consent" onclick="acceptConsent()">I Understand and Consent</button>
+                <button class="btn-decline" onclick="closeConsentModal()">Decline and Go Back</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="checkout-box">
+        <h2>Unlock Premium E-Book</h2>
+        <p style="color: #666; font-size: 0.9em;">Price: 10 Computed Shares</p>
+        <p style="color: #888; font-size: 0.8em;">No credit card required. Keep this tab open to attest your device's computation.</p>
+
+        <div class="thread-slider-container">
+            <label for="threadSlider">CPU Threads Dedicated: <span id="threadCountDisplay" style="color: #007BFF;">1</span></label>
+            <input type="range" id="threadSlider" min="1" max="4" value="1" oninput="document.getElementById('threadCountDisplay').innerText = this.value;">
+        </div>
+
+        <div class="progress-bar-container">
+            <div id="paymentProgress" class="progress-bar"></div>
+        </div>
+        <p id="statusText" style="font-weight: bold;">0 / 10 Shares Mined</p>
+
+        <button id="btnCheckout" onclick="handleMainButton()">Start Computational Payment</button>
+
+        <div class="feedback-panel">
+            <span class="hashrate-display">Speed: <span id="uiHashrate">0.00</span> H/s</span>
+            <div id="uiLogBox" class="log-box">
+                <div>[System] Waiting to start...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Thread setup
+        const maxThreads = navigator.hardwareConcurrency || 4;
+        const threadSlider = document.getElementById('threadSlider');
+        threadSlider.max = maxThreads;
+        const defaultThreads = Math.max(1, Math.floor(maxThreads / 2));
+        threadSlider.value = defaultThreads;
+        document.getElementById('threadCountDisplay').innerText = defaultThreads;
+
+        // UI State Variables
+        let minerState = "STOPPED"; // STOPPED, RUNNING, PAUSED, COMPLETE
+
+        // 1. Business Logic Controller (Added Pause capability)
+        class ZeroLiquidityCheckout {
+            constructor(config) {
+                this.targetPrice = config.targetPrice;
+                this.payment = 0;
+                this.mainMining = config.mainMining; 
+                this.mainItemDelivery = config.mainItemDelivery;
+            }
+
+            startPayment() {
+                this.mainMining.start((minedAmount) => {
+                    this.monitorProgress(minedAmount);
+                });
+            }
+
+            pausePayment() {
+                this.mainMining.stop();
+            }
+
+            monitorProgress(minedAmount) {
+                this.payment += minedAmount;
+                const percentage = Math.min((this.payment / this.targetPrice) * 100, 100);
+                document.getElementById('paymentProgress').style.width = percentage + "%";
+                document.getElementById('statusText').innerText = `${this.payment} / ${this.targetPrice} Shares Mined`;
+
+                if (this.payment >= this.targetPrice) {
+                    minerState = "COMPLETE";
+                    this.mainMining.stop();            
+                    this.mainItemDelivery.execute();  
+                }
+            }
+        }
+
+        class FileUnlockDelivery {
+            constructor(filename) { this.filename = filename; }
+            execute() {
+                const btn = document.getElementById('btnCheckout');
+                btn.disabled = true;
+                btn.className = "btn-success";
+                btn.innerText = "Download Unlocked!";
+                document.getElementById('statusText').innerText = "Payment Complete!";
+                document.getElementById('threadSlider').disabled = true;
+                alert(`Success! Delivery executed for: ${this.filename}`);
+            }
+        }
+
+        const minerEngine = new MintMeWasmMiner(
+            'ws://127.0.0.1:8888', 
+            '0xa733c9545a3476de410e7704d8be586d59db9c6d', 
+            'client-checkout'
+        );
+
+        minerEngine.setUIHooks(
+            (logMessage) => {
+                const el = document.getElementById('uiLogBox');
+                const d = document.createElement('div');
+                d.innerText = `[${new Date().toLocaleTimeString()}] ${logMessage}`;
+                el.prepend(d); 
+            },
+            (hashrate) => { document.getElementById('uiHashrate').innerText = hashrate; }
+        );
+
+        const myCheckout = new ZeroLiquidityCheckout({
+            targetPrice: 10, 
+            mainMining: minerEngine, 
+            mainItemDelivery: new FileUnlockDelivery('premium_file.pdf') 
+        });
+
+        // --- NEW UI EVENT HANDLERS ---
+
+        function handleMainButton() {
+            if (minerState === "STOPPED") {
+                // First time clicking: Show consent pop-up
+                document.getElementById('consentModal').style.display = "flex";
+            } else if (minerState === "RUNNING") {
+                // Currently mining: Pause it
+                pauseMining();
+            } else if (minerState === "PAUSED") {
+                // Currently paused: Resume it
+                resumeMining();
+            }
+        }
+
+        function closeConsentModal() {
+            document.getElementById('consentModal').style.display = "none";
+        }
+
+        function acceptConsent() {
+            closeConsentModal();
+            startMining();
+        }
+
+        function startMining() {
+            minerState = "RUNNING";
+            
+            const btn = document.getElementById('btnCheckout');
+            btn.className = "btn-pause";
+            btn.innerText = "Pause Computation";
+            
+            document.getElementById('threadSlider').disabled = true;
+            const selectedThreads = parseInt(document.getElementById('threadSlider').value);
+            minerEngine.setThreadCount(selectedThreads);
+            
+            myCheckout.startPayment();
+        }
+
+        function pauseMining() {
+            minerState = "PAUSED";
+            myCheckout.pausePayment();
+            
+            const btn = document.getElementById('btnCheckout');
+            btn.className = ""; // Remove pause styling, revert to default blue
+            btn.innerText = "Resume Computation";
+            
+            // Allow user to change thread count while paused
+            document.getElementById('threadSlider').disabled = false; 
+            
+            const el = document.getElementById('uiLogBox');
+            const d = document.createElement('div');
+            d.innerText = `[${new Date().toLocaleTimeString()}] [System] Computation Paused by User.`;
+            d.style.color = "#ff9800";
+            el.prepend(d);
+        }
+
+        function resumeMining() {
+            startMining(); // Logic is identical to starting, it just picks up where payment left off
+        }
+    </script>
+</body>
+</html>
