@@ -9,5 +9,3 @@ emcc -O3 bridge.cpp Lyra2.c Sponge.c \
   -s EXPORTED_RUNTIME_METHODS="['ccall','cwrap']" \
   -s EXPORT_NAME='createMintMeModule' \
   -s MODULARIZE=1
-
-  
