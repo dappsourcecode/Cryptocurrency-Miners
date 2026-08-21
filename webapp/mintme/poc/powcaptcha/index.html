@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PoW Gatekeeper Demo</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="article-container">
+        <h1>The Future of Web Monetization</h1>
+        <p>This is the free, publicly accessible introduction to the article. Anyone can read this without any friction.</p>
+        
+        <!-- The CAPTCHA Widget will inject itself here -->
+        <div id="pow-gatekeeper-container" data-target-shares="15"></div>
+
+        <!-- The hidden content -->
+        <div id="secret-content" style="display: none;">
+            <h2>Exclusive Research Findings</h2>
+            <p>Congratulations! Your device has successfully attested its computational power. This is the highly valuable, premium content that was protected by the PoW Gatekeeper.</p>
+        </div>
+    </div>
+
+    <!-- Drop-in script -->
+    <script src="powcaptcha.js"></script>
+    <!--<script src="scripts.js"></script>-->
+</body>
+</html>
