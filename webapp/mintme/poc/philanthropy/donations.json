@@ -1,0 +1,22 @@
+{
+  "global_stats": {
+    "total_community_shares": 9,
+    "total_community_hashes": 589824,
+    "total_community_time_seconds": 31,
+    "estimated_mintme_contributed": 0.000882,
+    "total_unique_donors": 1,
+    "last_updated": "2026-08-22T08:43:52.824278+00:00"
+  },
+  "workers": {
+    "Anonymous_Donor": {
+      "shares": 9,
+      "total_hashes": 589824,
+      "total_time_seconds": 31,
+      "avg_hashrate_hps": 19026.58,
+      "estimated_mintme": 0.000882,
+      "first_seen": "2026-08-22T08:43:23.858791+00:00",
+      "last_active": "2026-08-22T08:43:52.824278+00:00",
+      "threads_used": 1
+    }
+  }
+}

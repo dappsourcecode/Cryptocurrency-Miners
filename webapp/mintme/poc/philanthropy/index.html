@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compute for Good — Philanthropy Mining Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Header -->
+        <header class="dash-header">
+            <h1>❤️ Compute for Good</h1>
+            <p>Donate your idle CPU power to support charitable causes transparently.</p>
+        </header>
+
+        <!-- Donor Setup & Mining Control Panel -->
+        <section class="card setup-card">
+            <h2>1. Donor Setup & Execution</h2>
+            <div class="form-group">
+                <label for="donor-name"><strong>Donor / Worker ID Name:</strong></label>
+                <input type="text" id="donor-name" placeholder="e.g., DonorAlice" value="Anonymous_Donor">
+            </div>
+
+            <div class="form-group">
+                <label for="thread-slider"><strong>CPU Threads Allocated:</strong> <span id="thread-count-val">2</span></label>
+                <input type="range" id="thread-slider" min="1" max="8" value="2">
+            </div>
+
+            <!-- Transparency Grid -->
+            <div class="transparency-grid">
+                <div><strong>Target Pool:</strong> <span id="info-pool">mintme.wattpool.net:2222</span></div>
+                <div><strong>Algorithm:</strong> <span id="info-algo">Lyra2v2 (Webchain)</span></div>
+                <div class="full-width"><strong>Beneficiary Wallet:</strong> <span id="info-wallet">0xa733c9545a3476de410e7704d8be586d59db9c6d</span></div>
+            </div>
+
+            <!-- Live Status Indicator -->
+            <div class="stats-row">
+                <div class="stat-box">
+                    <span class="stat-label">Session Shares</span>
+                    <span id="session-shares" class="stat-value">0</span>
+                </div>
+                <div class="stat-box">
+                    <span class="stat-label">Live Hash Rate</span>
+                    <span id="session-hashrate" class="stat-value">0.00 H/s</span>
+                </div>
+            </div>
+
+            <div class="action-buttons">
+                <button id="btn-toggle-mining" class="btn btn-primary">Start Donating CPU</button>
+            </div>
+
+            <!-- Terminal Logs -->
+            <div id="log-terminal" class="terminal-box">
+                <div>[System] Ready to start computational donation.</div>
+            </div>
+        </section>
+
+        <!-- Leaderboard & Global Stats Section -->
+        <section class="card leaderboard-card">
+            <div class="card-header-flex">
+                <h2>2. Donor Community Leaderboard</h2>
+                <button id="btn-refresh-leaderboard" class="btn btn-secondary">🔄 Refresh Leaderboard</button>
+            </div>
+
+            <!-- Global Aggregates -->
+            <div class="global-summary-grid">
+                <div>
+                    <span class="g-label">Total Community Shares</span>
+                    <span id="g-shares" class="g-val">0</span>
+                </div>
+                <div>
+                    <span class="g-label">Total Hashes Mined</span>
+                    <span id="g-hashes" class="g-val">0</span>
+                </div>
+                <div>
+                    <span class="g-label">Est. MINTME Generated</span>
+                    <span id="g-mintme" class="g-val">0.0000</span>
+                </div>
+                <div>
+                    <span class="g-label">Unique Donors</span>
+                    <span id="g-donors" class="g-val">0</span>
+                </div>
+            </div>
+
+            <!-- Leaderboard Table -->
+            <div class="table-wrapper">
+                <table id="leaderboard-table">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Donor ID</th>
+                            <th>Accepted Shares</th>
+                            <th>Total Hashes</th>
+                            <th>Est. MINTME</th>
+                            <th>Avg Speed</th>
+                            <th>Active Time</th>
+                            <th>Last Active</th>
+                        </tr>
+                    </thead>
+                    <tbody id="leaderboard-body">
+                        <tr>
+                            <td colspan="7" style="text-align: center;">Click "Refresh Leaderboard" to load donor records.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <script src="philanthropy.js"></script>
+</body>
+</html>

@@ -4,7 +4,8 @@ import socket
 
 # Configuration
 LOCAL_PORT = 8888
-POOL_HOST = "pool.webchain.network"
+# POOL_HOST = "pool.webchain.network"
+POOL_HOST = "pool.mintme.com"
 POOL_PORT = 2222
 
 print(f"⚡ Stratum Proxy Started on port {LOCAL_PORT}")
