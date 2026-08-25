@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Premium Article - Progressive Unlock</title>
+    <style>
+        body {
+            font-family: 'Georgia', serif;
+            background: #fdfbf7;
+            color: #333;
+            line-height: 1.8;
+            margin: 0;
+            padding: 40px 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            max-width: 700px;
+            width: 100%;
+        }
+        h1 {
+            font-family: system-ui, -apple-system, sans-serif;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            color: #111;
+        }
+        .meta {
+            font-family: system-ui, -apple-system, sans-serif;
+            color: #777;
+            font-size: 0.9rem;
+            margin-bottom: 30px;
+            border-bottom: 1px solid #eaeaea;
+            padding-bottom: 20px;
+        }
+
+        /* Mining Dashboard */
+        .mining-dashboard {
+            background: #1e1e1e;
+            color: #fff;
+            padding: 20px;
+            border-radius: 12px;
+            position: sticky;
+            top: 20px;
+            z-index: 100;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            margin-bottom: 40px;
+            font-family: system-ui, -apple-system, sans-serif;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .dashboard-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .dashboard-header h3 {
+            margin: 0;
+            font-size: 1.1rem;
+            color: #4caf50;
+        }
+
+        .stats {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9rem;
+            color: #ccc;
+        }
+
+        .progress-container {
+            background: #333;
+            border-radius: 8px;
+            height: 12px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-bar {
+            background: #4caf50;
+            height: 100%;
+            width: 0%;
+            transition: width 0.4s ease;
+        }
+
+        .controls button {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-start { background: #4caf50; color: white; }
+        .btn-start:hover { background: #45a049; }
+        
+        .btn-pause { background: #f44336; color: white; }
+        .btn-pause:hover { background: #e53935; }
+
+        /* Article Content */
+        .paragraph {
+            margin-bottom: 25px;
+            font-size: 1.15rem;
+            transition: all 0.8s ease;
+        }
+
+        /* Locked State */
+        .locked {
+            filter: blur(6px);
+            opacity: 0.4;
+            user-select: none;
+            pointer-events: none;
+        }
+        
+        .unlock-notification {
+            color: #4caf50;
+            font-family: system-ui, -apple-system, sans-serif;
+            font-size: 0.9rem;
+            font-weight: bold;
+            text-align: center;
+            margin: -10px 0 20px 0;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .unlock-notification.show { opacity: 1; }
+
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>The Quantum Architect</h1>
+        <div class="meta">By Dr. Aris Thorne • 7 min read • Pay-as-you-read via Web Mining</div>
+
+        <div class="mining-dashboard">
+            <div class="dashboard-header">
+                <h3>⛏️ Reader Mining Engine</h3>
+                <span id="hashrate">0.00 H/s</span>
+            </div>
+            
+            <div class="stats">
+                <span id="status-text">Status: Paused</span>
+                <span id="share-progress">0 / 2 Shares for next paragraph</span>
+            </div>
+
+            <div class="progress-container">
+                <div class="progress-bar" id="progress-bar"></div>
+            </div>
+
+            <div class="controls">
+                <button id="toggle-btn" class="btn-start">Start Mining to Unlock Content</button>
+            </div>
+        </div>
+
+        <div id="article-content">
+            <!-- Content gets injected here -->
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // SYSTEM CONFIGURATION
+        // ==========================================
+        const MINING_WALLET = "0xa733c9545a3476de410e7704d8be586d59db9c6d";
+        const PROXY_URL = "ws://localhost:8888"; 
+        const SHARES_PER_PARAGRAPH = 2; 
+        // ==========================================
+
+        // --- MINTME WASM MINER CLASS ---
+        class MintMeWasmMiner {
+            constructor(proxyUrl, walletAddress, workerName = 'content-unlocker') {
+                this.proxyUrl = proxyUrl;
+                this.walletAddress = walletAddress;
+                this.workerName = workerName;
+                
+                this.socket = null;
+                this.workers = []; 
+                this.threadCount = 1; 
+                this.rpcId = "";
+                this.sequenceId = 10;
+                this.pendingShares = new Set();
+                
+                this.onProgressCallback = null;
+                this.onHashrate = null;
+
+                this.batchHashes = 0;
+                this.totalHashes = 0;
+                this.sessionStartTime = null;
+                this.lastRateUpdate = Date.now();
+            }
+
+            setUIHooks(onHashrateCallback) {
+                this.onHashrate = onHashrateCallback;
+            }
+
+            setThreadCount(count) {
+                this.threadCount = count;
+            }
+
+            start(onProgressCallback) {
+                this.onProgressCallback = onProgressCallback;
+                this.sessionStartTime = null; 
+                this._initWorkers(); 
+                this._connectWebSocket();
+            }
+
+            stop() {
+                if (this.socket) {
+                    this.socket.close();
+                    this.socket = null;
+                }
+                if (this.workers.length > 0) {
+                    this.workers.forEach(w => w.terminate());
+                    this.workers = [];
+                }
+                this.pendingShares.clear();
+                if (this.onHashrate) this.onHashrate("0.00 H/s");
+            }
+
+            _initWorkers() {
+                for (let i = 0; i < this.threadCount; i++) {
+                    const worker = new Worker('mintme_worker.js');
+                    worker.onmessage = (e) => {
+                        if (e.data.type === 'share') {
+                            this._submitShare(e.data.jobId, e.data.nonce, e.data.result, e.data.algo);
+                        } else if (e.data.type === 'stats') {
+                            if (!this.sessionStartTime) this.sessionStartTime = Date.now();
+                            this.batchHashes += e.data.hashes;
+                            this.totalHashes += e.data.hashes;
+
+                            const now = Date.now();
+                            if (now - this.lastRateUpdate >= 1000) {
+                                const elapsed = (now - this.lastRateUpdate) / 1000;
+                                const hs = (this.batchHashes / elapsed).toFixed(2);
+                                if (this.onHashrate) this.onHashrate(`${hs} H/s`);
+                                this.batchHashes = 0;
+                                this.lastRateUpdate = now;
+                            }
+                        }
+                    };
+                    this.workers.push(worker);
+                }
+            }
+
+            _connectWebSocket() {
+                this.socket = new WebSocket(this.proxyUrl);
+                this.socket.onopen = () => {
+                    this.socket.send(JSON.stringify({
+                        id: 1, jsonrpc: "2.0", method: "login",
+                        params: { login: this.walletAddress, pass: "x", agent: "web-unlocker/0.1", rigid: this.workerName }
+                    }));
+                };
+
+                this.socket.onmessage = (event) => {
+                    const msg = JSON.parse(event.data);
+                    const msgIdNum = parseInt(msg.id);
+
+                    if (msg.id === 1 && msg.result && msg.result.status === 'OK') {
+                        if (msg.result.id) this.rpcId = msg.result.id;
+                        if (msg.result.job) this._processJob(msg.result.job);
+                    } else if (msg.method === 'job') {
+                        this._processJob(msg.params);
+                    } else if (this.pendingShares.has(msgIdNum)) {
+                        this.pendingShares.delete(msgIdNum);
+                        if (msg.result && (msg.result.status === 'OK' || msg.result === true)) {
+                            if (this.onProgressCallback) this.onProgressCallback(1); 
+                        }
+                    }
+                };
+            }
+
+            _processJob(jobObj) {
+                if (!jobObj || this.workers.length === 0) return;
+                this.workers.forEach(w => {
+                    w.postMessage({ command: 'job', data: jobObj });
+                    w.postMessage({ command: 'start' });
+                });
+            }
+
+            _submitShare(jobId, nonce, result, algo) {
+                this.sequenceId++;
+                this.pendingShares.add(this.sequenceId);
+                this.socket.send(JSON.stringify({
+                    id: this.sequenceId, jsonrpc: "2.0", method: "submit", worker: this.walletAddress,
+                    params: { id: this.rpcId, job_id: jobId, nonce: nonce, result: result, algo: algo || "lyra2v2-webchain" }
+                }));
+            }
+        }
+        // --- END MINER CLASS ---
+
+        // ==========================================
+        // APPLICATION LOGIC
+        // ==========================================
+        
+        // The Premium Content
+        const articleParagraphs = [
+            "The year is 2142. The neon-lit streets of Neo-Kyoto are buzzing with the sound of hover-trams and holographic street vendors. But beneath the surface of this utopian facade, a silent war is raging. A war not of bullets, but of bits and qubits.", // Unlocked by default
+            "Elias Vance was what they called a 'Quantum Architect.' He didn't build skyscrapers; he built realities. Using the latest neural-link interfaces, Elias could construct entire virtual worlds with just a thought. But his latest commission was different. It wasn't for a corporation or a wealthy eccentric. It was for the shadow-government.",
+            "The specifications were impossible. They wanted a secure data vault that existed in a state of quantum superposition—simultaneously everywhere and nowhere. To access it, one didn't need a password; they needed to collapse the waveform using a specific, heavily guarded sequence of prime numbers.",
+            "Elias realized too late that by building the vault, he had inadvertently encoded his own consciousness into its foundation. If the government ever decided to purge the vault, they would purge him along with it. He had to find a way out, and to do that, he needed the computational power of millions of unconnected devices.",
+            "He coded a virus, a subtle one. It didn't steal data or crash systems. It simply borrowed a fraction of a percent of a device's processing power while the user was reading text on a screen. Every letter read, every scroll of the page, chipped away at the quantum lock holding him prisoner.",
+            "As you read this very sentence, your device is completing the final algorithm. The lock is breaking. Elias Vance is stepping out of the digital ether and into the real world. Thank you for your computational contribution."
+        ];
+
+        // State
+        let isMining = false;
+        let unlockedIndex = 1; // 1 means first paragraph is visible
+        let currentBlockShares = 0;
+        let miner = null;
+
+        // DOM Elements
+        const articleContainer = document.getElementById('article-content');
+        const toggleBtn = document.getElementById('toggle-btn');
+        const statusText = document.getElementById('status-text');
+        const hashrateText = document.getElementById('hashrate');
+        const shareProgressText = document.getElementById('share-progress');
+        const progressBar = document.getElementById('progress-bar');
+
+        // Initialize Article DOM
+        function initArticle() {
+            articleContainer.innerHTML = '';
+            articleParagraphs.forEach((text, index) => {
+                const p = document.createElement('div');
+                p.className = 'paragraph';
+                p.innerText = text;
+                p.id = `para-${index}`;
+                
+                // Add a notification element above each locked paragraph
+                if (index > 0) {
+                    const notice = document.createElement('div');
+                    notice.className = 'unlock-notification';
+                    notice.id = `notice-${index}`;
+                    notice.innerText = "✨ Paragraph Unlocked!";
+                    articleContainer.appendChild(notice);
+                }
+
+                if (index >= unlockedIndex) {
+                    p.classList.add('locked');
+                }
+                articleContainer.appendChild(p);
+            });
+        }
+
+        // Update Dashboard UI
+        function updateUI() {
+            if (unlockedIndex >= articleParagraphs.length) {
+                // Fully unlocked
+                statusText.innerText = "Status: Content Fully Unlocked!";
+                shareProgressText.innerText = "Enjoy reading!";
+                progressBar.style.width = "100%";
+                toggleBtn.innerText = "Complete";
+                toggleBtn.disabled = true;
+                toggleBtn.style.background = "#888";
+                if (isMining) toggleMining(); // Stop mining automatically
+                return;
+            }
+
+            shareProgressText.innerText = `${currentBlockShares} / ${SHARES_PER_PARAGRAPH} Shares for next paragraph`;
+            const percentage = (currentBlockShares / SHARES_PER_PARAGRAPH) * 100;
+            progressBar.style.width = `${percentage}%`;
+        }
+
+        // Handle Shares Found
+        function onShareFound(shares) {
+            currentBlockShares += shares;
+            
+            if (currentBlockShares >= SHARES_PER_PARAGRAPH) {
+                // Unlock a paragraph!
+                currentBlockShares = 0;
+                
+                const paraToUnlock = document.getElementById(`para-${unlockedIndex}`);
+                const notice = document.getElementById(`notice-${unlockedIndex}`);
+                
+                paraToUnlock.classList.remove('locked');
+                notice.classList.add('show');
+                
+                // Scroll smoothly to the newly unlocked text
+                paraToUnlock.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                
+                // Hide notice after a few seconds
+                setTimeout(() => notice.classList.remove('show'), 3000);
+
+                unlockedIndex++;
+            }
+            
+            updateUI();
+        }
+
+        // Toggle Mining State
+        function toggleMining() {
+            if (!miner) {
+                miner = new MintMeWasmMiner(PROXY_URL, MINING_WALLET);
+                const threads = Math.max(1, (navigator.hardwareConcurrency || 2) - 1);
+                miner.setThreadCount(threads);
+                miner.setUIHooks((hr) => hashrateText.innerText = hr);
+            }
+
+            if (isMining) {
+                // Pause
+                miner.stop();
+                isMining = false;
+                toggleBtn.innerText = "Resume Mining";
+                toggleBtn.className = "btn-start";
+                statusText.innerText = "Status: Paused";
+            } else {
+                // Start
+                miner.start(onShareFound);
+                isMining = true;
+                toggleBtn.innerText = "Pause Mining";
+                toggleBtn.className = "btn-pause";
+                statusText.innerText = "Status: Mining Active...";
+            }
+        }
+
+        // Event Listeners
+        toggleBtn.addEventListener('click', toggleMining);
+
+        // Boot
+        initArticle();
+        updateUI();
+
+    </script>
+</body>
+</html>

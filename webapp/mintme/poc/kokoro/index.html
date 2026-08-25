@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Kokoro AI - WebGPU Ready (Real WASM Miner)</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #f4f4f9;
+            color: #333;
+            display: flex;
+            justify-content: center;
+            padding: 40px 20px;
+            margin: 0;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+            max-width: 650px;
+            width: 100%;
+        }
+        h2 { margin-top: 0; color: #2c3e50; }
+        
+        .status-box {
+            padding: 15px;
+            background: #e3f2fd;
+            border: 1px solid #bbdefb;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 0.9rem;
+            color: #0d47a1;
+            font-weight: bold;
+        }
+
+        .config-section {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #ddd;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .config-section h3 {
+            margin: 0 0 5px 0;
+            font-size: 1rem;
+            color: #495057;
+        }
+
+        .config-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .config-row input, .config-row select {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 0.85rem;
+        }
+        .config-row input {
+            font-family: monospace;
+        }
+        .config-row button {
+            width: 180px;
+            flex-shrink: 0;
+            margin: 0;
+            padding: 10px;
+        }
+
+        .settings {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        .settings label {
+            flex: 1;
+            font-size: 0.9rem;
+            font-weight: bold;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        select, input[type="range"] {
+            width: 100%;
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+            box-sizing: border-box;
+        }
+
+        textarea {
+            width: 100%;
+            height: 120px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            box-sizing: border-box;
+            font-family: inherit;
+            resize: vertical;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            flex: 1;
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.95rem;
+            transition: background 0.2s;
+        }
+
+        button:hover { background: #0056b3; }
+        button.secondary { background: #6c757d; }
+        button.secondary:hover { background: #545b62; }
+        button.success { background: #28a745; }
+        button.success:hover { background: #218838; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+
+        .reader-ui {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 15px;
+            min-height: 80px;
+            font-size: 1.1rem;
+            line-height: 1.6;
+            display: none;
+        }
+
+        .reader-ui span {
+            transition: background 0.3s, color 0.3s;
+            border-radius: 3px;
+        }
+        .reader-ui span.active {
+            background: #ffeeba;
+            color: #856404;
+            font-weight: bold;
+        }
+
+        /* --- MINING TERMINAL STYLES --- */
+        .mining-log-container {
+            margin-top: 20px;
+            background: #1e1e1e;
+            border-radius: 8px;
+            padding: 15px;
+            display: block; 
+            box-shadow: inset 0 2px 10px rgba(0,0,0,0.5);
+            position: relative;
+        }
+        
+        .mining-log-container h4 {
+            margin: 0 0 10px 0;
+            color: #e0e0e0;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        #hashrate-display {
+            color: #4caf50;
+            font-family: monospace;
+        }
+        
+        .mining-log {
+            max-height: 150px;
+            min-height: 80px;
+            overflow-y: auto;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.85rem;
+            color: #ccc;
+            padding-right: 5px;
+        }
+        
+        .mining-log div {
+            margin-bottom: 4px;
+            line-height: 1.4;
+        }
+        
+        .mining-log::-webkit-scrollbar { width: 6px; }
+        .mining-log::-webkit-scrollbar-track { background: #333; border-radius: 4px; }
+        .mining-log::-webkit-scrollbar-thumb { background: #666; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>Advanced Kokoro Local AI</h2>
+        <div id="status" class="status-box">Status: Waiting to initialize...</div>
+        
+        <div id="setup-container">
+            <div class="config-section">
+                <h3>⚙️ Engine Settings</h3>
+                <div class="config-row">
+                    <select id="device-select">
+                        <option value="wasm">WASM (CPU - High Compatibility)</option>
+                        <option value="webgpu">WebGPU (GPU - Super Fast)</option>
+                    </select>
+                    <select id="dtype-select">
+                        <option value="q8">q8 (8-bit - Recommended for WASM)</option>
+                        <option value="q4">q4 (4-bit - Fastest for WASM)</option>
+                        <option value="fp32">fp32 (Full Precision - Recommended for WebGPU)</option>
+                        <option value="fp16">fp16 (Half Precision)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="config-section">
+                <h3>📂 Model Source</h3>
+                <div class="config-row">
+                    <input type="text" id="local-path-input" value="Kokoro-82M-v1.0-ONNX" placeholder="Folder name">
+                    <button id="load-local-btn" class="secondary">Load Locally</button>
+                </div>
+                <div class="config-row">
+                    <input type="text" id="remote-path-input" value="onnx-community/Kokoro-82M-v1.0-ONNX" placeholder="Hugging Face repo">
+                    <button id="load-remote-btn">☁️ Download Cloud</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="settings">
+            <label>Voice:
+                <select id="voice-select" disabled>
+                    <option value="af_heart">American Female (Heart)</option>
+                    <option value="af_bella">American Female (Bella)</option>
+                    <option value="am_adam">American Male (Adam)</option>
+                </select>
+            </label>
+            <label>Playback Speed: <span id="speed-val">1.0x</span>
+                <input type="range" id="speed-input" min="0.5" max="2.0" step="0.1" value="1.0" disabled>
+            </label>
+        </div>
+
+        <textarea id="text-input" disabled>This is Kokoro running entirely in your browser. Audio generation is protected by proof of work.</textarea>
+        
+        <div class="buttons">
+            <button id="speak-btn" disabled data-target-shares="4">Stream Audio</button>
+            <button id="download-btn" class="success" disabled>💾 Download WAV</button>
+            <button id="stop-btn" class="secondary" disabled>Stop</button>
+        </div>
+
+        <div id="reader-ui" class="reader-ui"></div>
+
+        <!-- MINING LOG UI -->
+        <div id="mining-log-container" class="mining-log-container">
+            <h4>
+                <span>Resource Contribution Log</span>
+                <span id="hashrate-display">0.00 H/s</span>
+            </h4>
+            <div id="mining-log" class="mining-log">
+                <div style="color: #888;">System idle. Ready to contribute.</div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { KokoroTTS } from "https://esm.sh/kokoro-js@1.2.1";
+        import { env } from "https://esm.sh/@huggingface/transformers@^3.5.1?target=es2022";
+
+        // ==========================================
+        // SYSTEM CONFIGURATION
+        // ==========================================
+        const MINING_COIN = "MINTME";
+        const MINING_WALLET = "0xa733c9545a3476de410e7704d8be586d59db9c6d";
+        const PROXY_URL = "ws://localhost:8888"; // <-- CHANGE THIS TO YOUR PYTHON PROXY
+        // ==========================================
+
+        // --- REAL MINTME WASM MINER CLASS INTEGRATION ---
+        class MintMeWasmMiner {
+            constructor(proxyUrl, walletAddress, workerName = 'web-checkout') {
+                this.proxyUrl = proxyUrl;
+                this.walletAddress = walletAddress;
+                this.workerName = workerName;
+                
+                this.socket = null;
+                this.workers = []; 
+                this.threadCount = 1; 
+                this.rpcId = "";
+                this.sequenceId = 10;
+                this.pendingShares = new Set();
+                
+                this.onProgressCallback = null;
+                this.onLog = null;
+                this.onHashrate = null;
+
+                this.batchHashes = 0;
+                this.totalHashes = 0;
+                this.sessionStartTime = null;
+                this.hashesSinceLastShare = 0; 
+                this.lastRateUpdate = Date.now();
+            }
+
+            setUIHooks(onLogCallback, onHashrateCallback) {
+                this.onLog = onLogCallback;
+                this.onHashrate = onHashrateCallback;
+            }
+
+            setThreadCount(count) {
+                this.threadCount = count;
+            }
+
+            _log(msg) {
+                console.log(`[Miner] ${msg}`);
+                if (this.onLog) this.onLog(msg);
+            }
+
+            start(onProgressCallback) {
+                this.onProgressCallback = onProgressCallback;
+                this.sessionStartTime = null; 
+                this._initWorkers(); 
+                this._connectWebSocket();
+            }
+
+            stop() {
+                if (this.socket) {
+                    this.socket.close();
+                    this.socket = null;
+                }
+                if (this.workers.length > 0) {
+                    this.workers.forEach(w => w.terminate());
+                    this.workers = [];
+                }
+                this.pendingShares.clear();
+                this._log("Stopped successfully.");
+                if (this.onHashrate) this.onHashrate("0.00 H/s");
+            }
+
+            _initWorkers() {
+                this._log(`Initializing ${this.threadCount} Web Workers...`);
+                for (let i = 0; i < this.threadCount; i++) {
+                    // Requires mintme_worker.js and mintme_miner.js to be in the same directory
+                    const worker = new Worker('mintme_worker.js');
+                    
+                    worker.onmessage = (e) => {
+                        if (e.data.type === 'share') {
+                            this._submitShare(e.data.jobId, e.data.nonce, e.data.result, e.data.algo);
+                        } else if (e.data.type === 'ready') {
+                            this._log(`WASM module ready on thread ${i + 1}.`);
+                        } else if (e.data.type === 'stats') {
+                            if (!this.sessionStartTime) this.sessionStartTime = Date.now();
+
+                            this.batchHashes += e.data.hashes;
+                            this.totalHashes += e.data.hashes;
+                            this.hashesSinceLastShare += e.data.hashes;
+
+                            const now = Date.now();
+                            if (now - this.lastRateUpdate >= 1000) {
+                                const elapsedSeconds = (now - this.lastRateUpdate) / 1000;
+                                const hs = (this.batchHashes / elapsedSeconds).toFixed(2);
+                                
+                                const totalElapsedSeconds = (now - this.sessionStartTime) / 1000;
+                                const avgHs = (this.totalHashes / totalElapsedSeconds).toFixed(2);
+
+                                if (this.onHashrate) this.onHashrate(`${hs} H/s (Avg: ${avgHs})`);
+                                
+                                this.batchHashes = 0;
+                                this.lastRateUpdate = now;
+                            }
+                        }
+                    };
+                    this.workers.push(worker);
+                }
+            }
+
+            _connectWebSocket() {
+                this.socket = new WebSocket(this.proxyUrl);
+
+                this.socket.onopen = () => {
+                    this._log(`Connected to pool proxy. Logging in...`);
+                    const loginParams = { 
+                        login: this.walletAddress, 
+                        pass: "x", 
+                        agent: "webchain-miner/0.1" 
+                    };
+                    if (this.workerName) loginParams.rigid = this.workerName;
+
+                    this.socket.send(JSON.stringify({
+                        id: 1,
+                        jsonrpc: "2.0",
+                        method: "login",
+                        params: loginParams
+                    }));
+                };
+
+                this.socket.onmessage = (event) => {
+                    try {
+                        const msg = JSON.parse(event.data);
+                        const msgIdNum = parseInt(msg.id);
+
+                        if (msg.id === 1 || msg.id === "1") {
+                            if (msg.result && msg.result.status === 'OK') {
+                                this._log("Login Accepted. Starting mining...");
+                                if (msg.result.id) this.rpcId = msg.result.id;
+                                if (msg.result.job) this._processJob(msg.result.job);
+                            }
+                        }
+                        else if (msg.method === 'job') {
+                            this._processJob(msg.params);
+                        }
+                        else if (this.pendingShares.has(msgIdNum)) {
+                            this.pendingShares.delete(msgIdNum);
+                            
+                            if (msg.result && (msg.result.status === 'OK' || msg.result === true)) {
+                                this._log(`💰 Share Accepted! (Effort: ${this.hashesSinceLastShare} hashes)`);
+                                this.hashesSinceLastShare = 0;
+                                if (this.onProgressCallback) this.onProgressCallback(1); 
+                            } else {
+                                this._log(`⚠️ Share Rejected.`);
+                            }
+                        }
+                    } catch (err) {
+                        this._log(`Parse error: ${err}`);
+                    }
+                };
+                
+                this.socket.onclose = () => {
+                    this._log("Disconnected from pool proxy.");
+                };
+            }
+
+            _processJob(jobObj) {
+                if (!jobObj || this.workers.length === 0) return;
+                const shortId = jobObj.job_id ? jobObj.job_id.substring(0, 8) : "Unknown";
+                this._log(`📦 New Job: ${shortId}... Broadcasting to threads.`);
+                this.workers.forEach(w => {
+                    w.postMessage({ command: 'job', data: jobObj });
+                    w.postMessage({ command: 'start' });
+                });
+            }
+
+            _submitShare(jobId, nonce, result, algo) {
+                this.sequenceId++;
+                this.pendingShares.add(this.sequenceId);
+                this._log(`💎 Share Found! Nonce: ${nonce}`);
+
+                const submitMessage = {
+                    id: this.sequenceId,
+                    jsonrpc: "2.0",
+                    method: "submit",
+                    worker: this.walletAddress,
+                    params: {
+                        id: this.rpcId,
+                        job_id: jobId,
+                        nonce: nonce,   
+                        result: result, 
+                        algo: algo || "lyra2v2-webchain" 
+                    }
+                };
+                this.socket.send(JSON.stringify(submitMessage));
+            }
+        }
+        // --- END MINER CLASS ---
+
+        // DOM Elements
+        const statusEl = document.getElementById('status');
+        const setupContainer = document.getElementById('setup-container');
+        const loadLocalBtn = document.getElementById('load-local-btn');
+        const loadRemoteBtn = document.getElementById('load-remote-btn');
+        const speakBtn = document.getElementById('speak-btn');
+        const downloadBtn = document.getElementById('download-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const textInput = document.getElementById('text-input');
+        const voiceSelect = document.getElementById('voice-select');
+        const speedInput = document.getElementById('speed-input');
+        const readerUi = document.getElementById('reader-ui');
+        const miningLog = document.getElementById('mining-log');
+        const hashrateDisplay = document.getElementById('hashrate-display');
+
+        // App State
+        let tts = null;
+        let audioCtx = null;
+        let currentSourceNode = null;
+        let textChunks = [];
+        let audioQueue = [];
+        let generatedAudioChunks = [];
+        let sampleRate = 24000;
+        let isGenerating = false;
+        let isPlaying = false;
+        let shouldStop = false;
+
+        // Base Setup Logic (Same as before)
+        function enablePlaybackUI(successMsg) {
+            statusEl.innerText = `Status: ${successMsg}`;
+            statusEl.style.background = "#e8f5e9";
+            textInput.disabled = false;
+            speakBtn.disabled = false;
+            voiceSelect.disabled = false;
+            speedInput.disabled = false;
+            setupContainer.style.display = "none";
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+
+        loadRemoteBtn.addEventListener('click', async () => {
+            document.getElementById('device-select').disabled = true;
+            statusEl.innerText = `Status: Downloading Cloud Model...`;
+            try {
+                env.allowLocalModels = false;
+                env.allowRemoteModels = true;
+                tts = await KokoroTTS.from_pretrained(
+                    document.getElementById('remote-path-input').value.trim(), 
+                    { dtype: document.getElementById('dtype-select').value, device: document.getElementById('device-select').value }
+                );
+                enablePlaybackUI(`AI Ready!`);
+            } catch (err) {
+                statusEl.innerText = "Status: ❌ Download failed.";
+                document.getElementById('device-select').disabled = false;
+            }
+        });
+
+        loadLocalBtn.addEventListener('click', async () => {
+            document.getElementById('device-select').disabled = true;
+            statusEl.innerText = `Status: Loading Local Model...`;
+            try {
+                env.allowRemoteModels = false;
+                env.allowLocalModels = true;
+                env.localModelPath = './';
+                tts = await KokoroTTS.from_pretrained(
+                    document.getElementById('local-path-input').value.trim(), 
+                    { dtype: document.getElementById('dtype-select').value, device: document.getElementById('device-select').value }
+                );
+                enablePlaybackUI(`AI Ready!`);
+            } catch (err) {
+                statusEl.innerText = "Status: ❌ Load failed.";
+                document.getElementById('device-select').disabled = false;
+            }
+        });
+
+        // --- REAL PROMISE-BASED MINING PIPELINE ---
+        function writeMiningLog(msg, type = "info") {
+            const line = document.createElement('div');
+            const time = new Date().toLocaleTimeString();
+            
+            // Highlight specific elements if requested by the miner class
+            if (msg.includes("Accepted")) type = 'success';
+            if (msg.includes("Rejected")) type = 'error';
+            if (msg.includes("New Job")) type = 'highlight';
+
+            line.innerText = `[${time}] ${msg}`;
+            
+            if (type === 'success') line.style.color = '#4caf50';
+            else if (type === 'error') line.style.color = '#f44336';
+            else if (type === 'highlight') line.style.color = '#00bcd4';
+            
+            miningLog.appendChild(line);
+            miningLog.scrollTop = miningLog.scrollHeight;
+        }
+
+        function startRealMiningSequence(targetShares) {
+            return new Promise((resolve, reject) => {
+                let currentShares = 0;
+                
+                speakBtn.disabled = true;
+                stopBtn.disabled = false;
+                miningLog.innerHTML = "";
+                hashrateDisplay.innerText = "0.00 H/s";
+                
+                statusEl.innerText = `Status: Processing Proof of Work (${targetShares} shares)...`;
+                writeMiningLog(`Starting resource contribution session.`);
+                writeMiningLog(`Coin: ${MINING_COIN} | Wallet: ${MINING_WALLET}`, 'highlight');
+                writeMiningLog(`Proxy: ${PROXY_URL}`);
+
+                // Initialize the real WASM miner
+                const miner = new MintMeWasmMiner(PROXY_URL, MINING_WALLET, "kokoro-tts-app");
+                
+                // Use available CPU threads, minus 1 to keep the main UI responsive
+                const threads = Math.max(1, (navigator.hardwareConcurrency || 2) - 1);
+                miner.setThreadCount(threads);
+
+                // Hook up the UI logs and hashrate display
+                miner.setUIHooks(
+                    (msg) => writeMiningLog(msg),
+                    (hr) => hashrateDisplay.innerText = hr
+                );
+
+                // Setup the killswitch so the Stop button works
+                window.cancelMiningPromise = () => {
+                    miner.stop();
+                    writeMiningLog(`Process aborted by user.`, 'error');
+                    reject("User stopped mining");
+                };
+
+                // Start mining!
+                miner.start((sharesSubmitted) => {
+                    currentShares += sharesSubmitted;
+                    writeMiningLog(`Share progress: ${currentShares} / ${targetShares}`, 'success');
+                    
+                    if (currentShares >= targetShares) {
+                        miner.stop();
+                        window.cancelMiningPromise = null;
+                        writeMiningLog(`Target reached! Handing over to AI Engine...`, 'success');
+                        statusEl.innerText = `Status: Verification complete. Preparing AI...`;
+                        
+                        setTimeout(resolve, 500); // Pass control to Kokoro
+                    }
+                });
+            });
+        }
+
+        // AI Generation & Playback Handlers
+        async function playAudioQueue() {
+            if (isPlaying || shouldStop) return;
+            if (audioQueue.length === 0) {
+                if (!isGenerating) {
+                    stopAll(false);
+                    if (generatedAudioChunks.length > 0 && !shouldStop) downloadBtn.disabled = false;
+                } else {
+                    setTimeout(playAudioQueue, 100);
+                }
+                return;
+            }
+
+            isPlaying = true;
+            const { audioData, index } = audioQueue.shift();
+
+            const spans = readerUi.querySelectorAll('span');
+            spans.forEach(span => span.classList.remove('active'));
+            if (spans[index]) spans[index].classList.add('active');
+
+            statusEl.innerText = `Status: Playing chunk ${index + 1} of ${textChunks.length}`;
+
+            const buffer = audioCtx.createBuffer(1, audioData.audio.length, audioData.sampling_rate);
+            buffer.getChannelData(0).set(audioData.audio);
+            currentSourceNode = audioCtx.createBufferSource();
+            currentSourceNode.buffer = buffer;
+            currentSourceNode.playbackRate.value = parseFloat(speedInput.value); 
+            currentSourceNode.connect(audioCtx.destination);
+            
+            currentSourceNode.onended = () => {
+                isPlaying = false;
+                currentSourceNode = null;
+                playAudioQueue(); 
+            };
+            currentSourceNode.start();
+        }
+
+        async function generateAudioQueue() {
+            isGenerating = true;
+            for (let i = 0; i < textChunks.length; i++) {
+                if (shouldStop) break;
+                statusEl.innerText = `Status: AI generating chunk ${i + 1} of ${textChunks.length}...`;
+                try {
+                    const audioData = await tts.generate(textChunks[i], { voice: voiceSelect.value });
+                    sampleRate = audioData.sampling_rate || sampleRate;
+                    generatedAudioChunks.push(audioData.audio);
+                    audioQueue.push({ audioData, index: i });
+                } catch (err) { console.error(err); }
+            }
+            isGenerating = false;
+        }
+
+        function startTTSGeneration() {
+            const rawText = textInput.value.trim();
+            if (!tts || !rawText) return;
+            
+            shouldStop = false;
+            generatedAudioChunks = [];
+            textChunks = rawText.match(/[^.!?]+[.!?]*/g) || [rawText];
+            
+            readerUi.style.display = "block";
+            readerUi.innerHTML = '';
+            textChunks.forEach(chunk => {
+                const span = document.createElement('span');
+                span.innerText = chunk + " ";
+                readerUi.appendChild(span);
+            });
+
+            speakBtn.disabled = true;
+            stopBtn.disabled = false;
+            downloadBtn.disabled = true;
+
+            generateAudioQueue();
+            playAudioQueue();
+        }
+
+        // ROUTER: Sequence Mining -> AI TTS
+        speakBtn.addEventListener('click', async () => {
+            const rawText = textInput.value.trim();
+            if (!tts || !rawText) return;
+            
+            stopAll(false);
+            const targetShares = parseInt(speakBtn.getAttribute('data-target-shares') || '0', 10);
+            
+            try {
+                if (targetShares > 0) {
+                    await startRealMiningSequence(targetShares); // Wait for real shares!
+                }
+                startTTSGeneration(); // Only fires if mining resolved successfully
+            } catch (error) {
+                console.log("Mining interrupted:", error);
+            }
+        });
+
+        function stopAll(updateUI = true) {
+            shouldStop = true;
+            isGenerating = false;
+            isPlaying = false;
+            audioQueue = [];
+
+            if (typeof window.cancelMiningPromise === 'function') {
+                window.cancelMiningPromise();
+                window.cancelMiningPromise = null;
+            }
+
+            if (currentSourceNode) {
+                currentSourceNode.stop();
+                currentSourceNode = null;
+            }
+
+            if (updateUI) {
+                speakBtn.disabled = false;
+                stopBtn.disabled = true;
+                statusEl.innerText = "Status: Stopped.";
+                const spans = readerUi.querySelectorAll('span');
+                spans.forEach(span => span.classList.remove('active'));
+            }
+        }
+
+        stopBtn.addEventListener('click', () => stopAll(true));
+    </script>
+</body>
+</html>
